@@ -505,3 +505,10 @@ When modifying this repository:
 9.  Run relevant tests and report any tests that could not be run.
 10. Never claim a task is durable, resumable, or exactly-once unless the
     implementation and tests actually support that claim.
+11. All code must be written to production standards: handle every error
+    explicitly (never ignore returned errors), set context timeouts on all
+    I/O and database operations, use bounded queues and goroutine pools,
+    redact secrets from logs and error messages, validate all external
+    inputs, persist state before acknowledging side effects, and ensure
+    graceful shutdown releases all resources. No "TODO for later"
+    shortcuts in error handling, logging, or resource cleanup.

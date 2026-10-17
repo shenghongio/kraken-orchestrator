@@ -41,6 +41,8 @@ go.sum              # 保留 go.sum 是安全的，但如果您想忽略也可�
 .idea/
 .vscode/
 .trae
+AGENTS.md
+agents.md
 *.swp
 *.swo
 *~
