@@ -3,7 +3,7 @@ package postgres
 import (
 	"context"
 	"time"
-	
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
@@ -23,12 +23,12 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 	task.UpdatedAt = utc
 	task.Status = domain.TaskStatusPending
 	task.Version = 1
-	
+
 	// 业务层不关心 payload 时也能正常插入
 	if len(task.Payload) == 0 {
 		task.Payload = []byte("{}")
 	}
-	
+
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO tasks (
 			id,type,priority, status, payload,idempotency_key,
@@ -108,7 +108,7 @@ func scanTask(s rowScanner) (*domain.Task, error) {
 	var currentAgentID, errMsg *string
 	var result []byte
 	var nextRunAt time.Time
-	
+
 	err := s.Scan(
 		&t.ID, &t.Type, &t.Priority, &t.Status, &t.Payload, &t.IdempotencyKey,
 		&t.MaxRetries, &t.Attempt, &currentAgentID, &t.LeaseEpoch,
