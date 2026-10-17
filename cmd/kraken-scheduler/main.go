@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/config"
 	"github.com/shenghongio/kraken-orchestrator/internal/observability"
@@ -26,7 +26,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error loading scheduler config: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	logger := observability.InitLogger(loadSchedulerConfig.Log.Level, loadSchedulerConfig.Log.Format)
 	logger.Info("scheduler started", slog.String("addr", loadSchedulerConfig.HTTP.Addr), slog.String("db_dsn", observability.Redact("dsn", loadSchedulerConfig.DB.DSN)))
 	ctx, cancelFunc := context.WithCancel(context.Background())
@@ -48,20 +48,20 @@ func main() {
 		logger.Error("run migrations failed", slog.Any("error", err))
 		os.Exit(1)
 	}
-	
+
 	server := krakenhttp.NewServer(logger, loadSchedulerConfig.HTTP, pool)
 	go func() {
 		if err := server.Start(); err != nil {
 			logger.Error("start http server", slog.Any("error", err))
 		}
 	}()
-	
+
 	// 优雅关闭: 等待 SIGINT/SIGTERM
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigChan
 	logger.Info("shutdown down", slog.String("signal", sig.String()))
-	
+
 	if err := server.Shutdown(); err != nil {
 		logger.Error("shutdown http server", slog.Any("error", err))
 	}

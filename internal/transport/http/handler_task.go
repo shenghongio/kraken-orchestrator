@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
@@ -39,7 +39,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(req.Payload) == 0 {
 		req.Payload = json.RawMessage(`{}`)
 	}
-	
+
 	// 幂等： 已存在则直接返回
 	if req.IdempotencyKey != "" {
 		existing, err := h.repo.GetByIdempotencyKey(r.Context(), req.IdempotencyKey)

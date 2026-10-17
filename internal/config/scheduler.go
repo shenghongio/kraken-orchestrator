@@ -11,7 +11,7 @@ type SchedulerConfig struct {
 	HTTP  HTTPConfig
 	DB    DBConfig
 	Redis RedisConfig
-	
+
 	LeaseTTL            time.Duration `koanf:"lease.ttl"`
 	LeaseReaperInterval time.Duration `koanf:"lease.reaper_interval"`
 	HeartbeatInterval   time.Duration `koanf:"heartbeat.interval"`

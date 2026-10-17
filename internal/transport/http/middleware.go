@@ -78,7 +78,7 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				slog.String("request_id", r.Header.Get("X-Request-Id")),
 				slog.Int("status", rw.status),
 			)
-			
+
 		})
 	}
 }

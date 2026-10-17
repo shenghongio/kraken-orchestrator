@@ -8,14 +8,14 @@ import (
 type AgentConfig struct {
 	Log  LogConfig
 	HTTP HTTPConfig // agent 本地debug/metrics HTTP
-	
+
 	SchedulerURL   string   `koanf:"scheduler.url"`
 	AgentID        string   `koanf:"agent.id"`
 	Capabilities   []string `koanf:"agent.capabilities"`
 	MaxConcurrency int      `koanf:"agent.max_concurrency"`
 	WorkDir        string   `koanf:"agent.work_dir"`
 	SQLitePath     string   `koanf:"agent.sqlite_path"`
-	
+
 	HeartbeatInterval time.Duration `koanf:"heartbeat.interval"`
 	ClaimInterval     time.Duration `koanf:"claim.interval"`
 }

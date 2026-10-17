@@ -46,20 +46,20 @@ type Task struct {
 	Status         TaskStatus
 	Payload        []byte
 	IdempotencyKey string
-	
+
 	MaxRetries int
 	Attempt    int
-	
+
 	CurrentAgentID string
 	LeaseEpoch     int64
-	
+
 	CancelRequested bool
-	
+
 	Result []byte
 	Error  string
-	
+
 	NextRunAt time.Time
-	
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	Version   int

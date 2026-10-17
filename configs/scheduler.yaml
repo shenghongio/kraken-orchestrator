@@ -6,7 +6,7 @@ http:
   addr: ":8080"
 
 db:
-  dsn: "postgres://kraken:kraken@postgres:5432/kraken?sslmode=disable"
+  dsn: "postgres://kraken:325e91258149a0610d208b45f968de0d9913aac0@10.32.9.138:5432/kraken?sslmode=disable"
   max_open_conns: 25
   max_idle_conns: 5
 

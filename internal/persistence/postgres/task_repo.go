@@ -24,6 +24,11 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 	task.Status = domain.TaskStatusPending
 	task.Version = 1
 	
+	// 业务层不关心 payload 时也能正常插入
+	if len(task.Payload) == 0 {
+		task.Payload = []byte("{}")
+	}
+	
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO tasks (
 			id,type,priority, status, payload,idempotency_key,
@@ -38,7 +43,7 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 	return mapError(err)
 }
 
-//GetByID 按ID查询
+// GetByID 按ID查询
 func (r *TaskRepository) GetByID(ctx context.Context, id domain.TaskID) (*domain.Task, error) {
 	return scanTask(r.pool.QueryRow(ctx, `
 		SELECT id, type, priority, status, payload, idempotency_key,
@@ -81,7 +86,7 @@ func (r *TaskRepository) List(ctx context.Context) ([]*domain.Task, error) {
 	return tasks, rows.Err()
 }
 
-//RequestCancel 设置取消标记，乐观锁更新
+// RequestCancel 设置取消标记，乐观锁更新
 func (r *TaskRepository) RequestCancel(ctx context.Context, id domain.TaskID) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE tasks SET cancel_requested = TRUE,updated_at = $2 WHERE id = $1 AND status IN ('pending','running')`, id, time.Now().UTC())
 	if err != nil {

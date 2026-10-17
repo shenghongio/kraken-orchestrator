@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"errors"
-	
+
 	"github.com/jackc/pgx/v5"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )

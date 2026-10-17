@@ -3,7 +3,7 @@ package http
 import (
 	"log/slog"
 	"net/http"
-	
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/config"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
@@ -24,7 +24,7 @@ func (s *Server) Handler() http.Handler {
 	taskRepo := postgres.NewTaskRepository(s.pool)
 	taskHandler := NewTaskHandler(taskRepo)
 	healthHandler := NewHealthHandler(s.pool)
-	
+
 	// 拼接 http 请求url
 	mux.HandleFunc("GET /healthz", healthHandler.Healthz)
 	mux.HandleFunc("GET /readyz", healthHandler.Readyz)
@@ -32,9 +32,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tasks", taskHandler.List)
 	mux.HandleFunc("GET /v1/tasks/{id}", taskHandler.GetById)
 	mux.HandleFunc("POST /v1/tasks/{id}/cancel", taskHandler.Cancel)
-	
+
 	var handler http.Handler = mux
-	
+
 	// 每次请求时嵌入调用
 	handler = RequestID(handler)
 	handler = Recover(s.logger)(handler)

@@ -10,7 +10,7 @@ func TestIsRetryable(t *testing.T) {
 	if !IsRetryable(retryable) {
 		t.Error("expected retryable")
 	}
-	
+
 	notRetryable := NewInvalidInputError("invalid", nil)
 	if IsRetryable(notRetryable) {
 		t.Error("expected not retryable")

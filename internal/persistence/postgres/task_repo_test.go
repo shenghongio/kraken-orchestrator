@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 	
+	"github.com/shenghongio/kraken-orchestrator/internal/config"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
 
@@ -21,9 +22,18 @@ import (
 
 func getTestDSN(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("KRAKEN_TEST_DSN")
+	// 1, 环境变量
+	if dsn := os.Getenv("KRAKEN_TEST_DSN"); dsn != "" {
+		return dsn
+	}
+	k, err := config.Load("configs/scheduler.yaml")
+	if err != nil {
+		t.Skipf("skip: cannot load config: %v", err)
+		return ""
+	}
+	dsn := k.String("db.dsn")
 	if dsn == "" {
-		t.Skip("KRAKEN_TEST_DSN environment variable not set,skipping integration test")
+		t.Skipf("skip: db.dsn not set in configs/scheduler.yaml: %v", err)
 	}
 	return dsn
 }
@@ -37,10 +47,10 @@ func newTestRepo(t *testing.T) (*TaskRepository, func()) {
 	}
 	
 	// 清理测试数据
-	_, _ = pool.Exec(background, "TRUNCATE task CASCADE")
+	_, _ = pool.Exec(background, "TRUNCATE tasks CASCADE")
 	repository := NewTaskRepository(pool)
 	cleanup := func() {
-		_, _ = pool.Exec(background, "TRUNCATE task CASCADE")
+		_, _ = pool.Exec(background, "TRUNCATE tasks CASCADE")
 		pool.Close()
 	}
 	return repository, cleanup
