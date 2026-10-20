@@ -14,8 +14,8 @@ import (
 
 // Client 是Agent 调用 Schedule HTTP API 的客户端
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL    string       // Scheduler 的基础URL ,例如 http://scheduler:8080
+	httpClient *http.Client // 共享的 HTTP client,带超时控制
 }
 
 // ClaimRequest 领取任务接口
@@ -28,7 +28,7 @@ func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 30 * time.Second, // 防止慢请求卡住 agent
 		},
 	}
 }
@@ -52,14 +52,14 @@ func (c *Client) Register(ctx context.Context, req *RegisterAgentRequest) error 
 		return err
 	}
 	defer resp.Body.Close()
-
+	
 	if resp.StatusCode != http.StatusOK {
 		return readError(resp)
 	}
 	return nil
 }
 
-// Heartbeat 向 Scheduler 发送心跳
+// Heartbeat 向 Scheduler 发送心跳 ,上报当前 busy_slots
 func (c *Client) Heartbeat(ctx context.Context, req *HeartbeatRequest) error {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -91,7 +91,7 @@ func (c *Client) Claim(ctx context.Context, req *ClaimTaskRequest) (*ClaimTaskRe
 		return nil, err
 	}
 	defer resp.Body.Close()
-
+	
 	// 204 No Content: 没有可申领的任务
 	if resp.StatusCode == http.StatusNoContent {
 		return nil, nil
@@ -99,7 +99,7 @@ func (c *Client) Claim(ctx context.Context, req *ClaimTaskRequest) (*ClaimTaskRe
 	if resp.StatusCode != http.StatusOK {
 		return nil, readError(resp)
 	}
-
+	
 	var claimResp ClaimTaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&claimResp); err != nil {
 		return nil, fmt.Errorf("decode claim response: %w", err)
@@ -118,7 +118,7 @@ func (c *Client) SendCallback(ctx context.Context, req *CallbackRequest) error {
 		return err
 	}
 	defer resp.Body.Close()
-
+	
 	switch resp.StatusCode {
 	case http.StatusNoContent, http.StatusOK:
 		return nil
