@@ -11,15 +11,19 @@ import (
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
 
+// Reaper 定期扫描过期的 task_leases ，将任务回收为 pending（可重试）或 failed (超限)
 type Reaper struct {
 	pool     *pgxpool.Pool
 	logger   *slog.Logger
 	interval time.Duration
 }
 
+// NewReaper Run 启动租约收割循环，知道ctx 取消
 func NewReaper(pool *pgxpool.Pool, logger *slog.Logger, interval time.Duration) *Reaper {
 	return &Reaper{pool: pool, logger: logger, interval: interval}
 }
+
+// Run 指定收回循环，每隔 interval 扫描一次，直道 ctx 取消
 func (r *Reaper) Run(ctx context.Context) {
 	ticher := time.NewTicker(r.interval)
 	defer ticher.Stop()
@@ -39,6 +43,7 @@ func (r *Reaper) Run(ctx context.Context) {
 	
 }
 
+// sweep 扫描过期租约并回收，最多100个租约，逐个回收
 func (r *Reaper) sweep(ctx context.Context) error {
 	rows, err := r.pool.Query(ctx, `SELECT task_id, agent_id, attempt, lease_epoch FROM task_leases WHERE expires_at < NOW() ORDER BY expires_at ASC LIMIT 100`)
 	if err != nil {
@@ -73,6 +78,7 @@ func (r *Reaper) sweep(ctx context.Context) error {
 	return nil
 }
 
+// reclaim 回收单个过期租约,回收前会做fencing校验，避免误回收已被重新申领的任务
 func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID string, attempt int, leaseEpoch int64) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -80,7 +86,9 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 	}
 	defer tx.Rollback(ctx)
 	
+	// 锁定任务行
 	var status domain.TaskStatus
+	
 	var taskAttempt, maxRetries int
 	var taskLeaseEpoch int64
 	err = tx.QueryRow(ctx, `SELECT status, attempt, max_retries, lease_epoch FROM tasks WHERE id = $1 FOR UPDATE`,
@@ -88,6 +96,8 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 	if err != nil {
 		return err
 	}
+	
+	// fencing 校验: 如果lease_epoch 不匹配，说明任务已被重新申领，只需删除旧lease
 	if taskLeaseEpoch != leaseEpoch {
 		_, err := tx.Exec(ctx, `DELETE FROM task_leases WHERE task_id = $1 AND lease_epoch = $2`, taskID, leaseEpoch)
 		if err != nil {
@@ -95,6 +105,8 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 		}
 		return tx.Commit(ctx)
 	}
+	
+	// 只有running 状态的任务才需要回收
 	if status != domain.TaskStatusRunning {
 		_, err := tx.Exec(ctx, `DELETE FROM task_leases WHERE task_id = $1`, taskID)
 		if err != nil {
@@ -126,11 +138,19 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, event, agent_id, attempt) VALUES ($1, 'lease_expired', $2, $3)`, taskID, agentID, attempt)
+	
+	if err != nil {
+		return err
+	}
+	// 写入outbox事件
+	_, err = tx.Exec(ctx, `  INSERT INTO outbox_events (event_type, task_id, payload) VALUES ('task.lease_expired', $1, '{}')`, taskID)
 	if err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
+
+// nextBackoff 与 callback_repo.go 保持一致
 func nextBackoff(attempt int) time.Duration {
 	base := 5 * time.Second
 	max := 10 * time.Minute
@@ -139,5 +159,6 @@ func nextBackoff(attempt int) time.Duration {
 		d = max
 	}
 	jitter := time.Duration(rand.Int63n(int64(d)/2 + 1))
+	
 	return d/2 + jitter
 }

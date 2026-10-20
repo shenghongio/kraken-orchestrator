@@ -2,9 +2,10 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
-	
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
@@ -33,12 +34,12 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 	task.UpdatedAt = utc
 	task.Status = domain.TaskStatusPending
 	task.Version = 1
-	
+
 	// 业务层不关心 payload 时也能正常插入
 	if len(task.Payload) == 0 {
 		task.Payload = []byte("{}")
 	}
-	
+
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,
 							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
@@ -103,7 +104,7 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 		return nil, mapError(err)
 	}
 	defer tx.Rollback(ctx)
-	
+
 	var taskID domain.TaskID
 	err = tx.QueryRow(ctx, `SELECT id FROM tasks WHERE status = 'pending' AND cancel_requested = FALSE AND next_run_at <= NOW()
 								ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&taskID)
@@ -122,7 +123,7 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 	if err != nil {
 		return nil, mapError(err)
 	}
-	
+
 	_, err = tx.Exec(ctx, `INSERT INTO task_attempts (task_id, agent_id, attempt, lease_epoch, status, started_at) VALUES
                                 ($1, $2, $3, $4, 'running'), $5`,
 		taskID, agentID, attempt, leaseEpoch, now)
@@ -136,11 +137,23 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 	if err != nil {
 		return nil, mapError(err)
 	}
-	
+
 	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, event, agent_id, attempt)VALUES ($1, 'claimed', $2, $3)`, taskID, agentID, attempt)
 	if err != nil {
 		return nil, mapError(err)
 	}
+
+	// 写入outbox事件，与任务状态变更在同一个事务内
+	payload, _ := json.Marshal(map[string]any{
+		"attempt":     attempt,
+		"lease_epoch": leaseEpoch,
+		"agent_id":    agentID,
+	})
+	_, err = tx.Exec(ctx, `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ('task.claimed', $1, $2)`, taskID, payload)
+	if err != nil {
+		return nil, mapError(err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, mapError(err)
 	}
@@ -180,7 +193,7 @@ func scanTask(s rowScanner) (*domain.Task, error) {
 	var currentAgentID, errMsg *string
 	var result []byte
 	var nextRunAt time.Time
-	
+
 	err := s.Scan(
 		&t.ID, &t.Type, &t.Priority, &t.Status, &t.Payload, &t.IdempotencyKey,
 		&t.MaxRetries, &t.Attempt, &currentAgentID, &t.LeaseEpoch,

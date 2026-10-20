@@ -6,18 +6,19 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
 
+// AgentHandler 处理Agent 相关的 HTTP 请求： 注册，心跳，申领任务
 type AgentHandler struct {
-	repo     *postgres.AgentRepoository
+	repo     *postgres.AgentRepository
 	logger   *slog.Logger
 	taskRepo *postgres.TaskRepository
 }
 
-func NewAgentHandler(repo *postgres.AgentRepoository, taskRepo *postgres.TaskRepository, logger *slog.Logger) *AgentHandler {
+func NewAgentHandler(repo *postgres.AgentRepository, taskRepo *postgres.TaskRepository, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{repo: repo, taskRepo: taskRepo, logger: logger}
 }
 
@@ -45,6 +46,7 @@ type HeartbeatRequest struct {
 }
 
 // Register POST /v1/agent/register
+// Agent 注册或更新静态信息
 func (h *AgentHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -75,6 +77,7 @@ func (h *AgentHandler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // Heartbeat POST /v1/agent/heartbeat
+// 原子申领一个执行任务，无任务时返回204 code
 func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	var req HeartbeatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

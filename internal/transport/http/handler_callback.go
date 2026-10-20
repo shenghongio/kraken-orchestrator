@@ -5,11 +5,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
 
+// CallbackHandler 处理 Agent 的执行结果回调
 type CallbackHandler struct {
 	taskRepo *postgres.TaskRepository
 	logger   *slog.Logger
@@ -30,6 +31,7 @@ type CallbackRequest struct {
 }
 
 // Callback  Callback POST /v1/callback
+// Agent 上报任务执行结果(success/filed/cancelled)
 func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	var req CallbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -47,7 +49,7 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "status must be one of: success,failed cancelled", "invalid_input")
 		return
 	}
-	
+
 	var result []byte
 	if len(req.Result) > 0 {
 		result = []byte(req.Result)

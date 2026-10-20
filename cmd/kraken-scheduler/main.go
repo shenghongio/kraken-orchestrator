@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
-	
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/config"
 	"github.com/shenghongio/kraken-orchestrator/internal/lease"
@@ -27,7 +29,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error loading scheduler config: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	logger := observability.InitLogger(loadSchedulerConfig.Log.Level, loadSchedulerConfig.Log.Format)
 	logger.Info("scheduler started", slog.String("addr", loadSchedulerConfig.HTTP.Addr), slog.String("db_dsn", observability.Redact("dsn", loadSchedulerConfig.DB.DSN)))
 	ctx, cancelFunc := context.WithCancel(context.Background())
@@ -49,7 +51,7 @@ func main() {
 		logger.Error("run migrations failed", slog.Any("error", err))
 		os.Exit(1)
 	}
-	
+
 	server := krakenhttp.NewServer(logger, loadSchedulerConfig, pool)
 	reaper := lease.NewReaper(pool, logger, loadSchedulerConfig.LeaseReaperInterval)
 	go reaper.Run(ctx)
@@ -58,13 +60,13 @@ func main() {
 			logger.Error("start http server", slog.Any("error", err))
 		}
 	}()
-	
+
 	// 优雅关闭: 等待 SIGINT/SIGTERM
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigChan
 	logger.Info("shutdown down", slog.String("signal", sig.String()))
-	
+
 	if err := server.Shutdown(); err != nil {
 		logger.Error("shutdown http server", slog.Any("error", err))
 	}
@@ -74,17 +76,37 @@ func main() {
 // 迁移辅助函数
 
 // 从embed.FS 读取migrations/001_init.sql文件内容
-// 从连接池获取一个DB连接
 // 调用postgres.RunMigrations() 执行sql （建表）
+// 从连接池获取一个DB连接
+// runMigrations 按文件名顺序执行所有迁移文件
 func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	sqlBytes, err := migrationFS.ReadFile("migrations/001_init.sql")
+	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
-		return fmt.Errorf("read migrations failed: %w", err)
+		return fmt.Errorf("migrations directory: %w", err)
 	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return fmt.Errorf("acquire connection failed: %w", err)
+		return fmt.Errorf("acquire connection: %w", err)
 	}
+
 	defer conn.Release()
-	return postgres.RunMigrations(ctx, conn.Conn(), string(sqlBytes))
+
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		sqlBytes, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+
+			return fmt.Errorf("read migrations failed: %w", err)
+		}
+		if err := postgres.RunMigrations(ctx, conn.Conn(), string(sqlBytes)); err != nil {
+			return fmt.Errorf("run migrations %s: %w", entry.Name(), err)
+		}
+		return nil
+	}
 }

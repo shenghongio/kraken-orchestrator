@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
 	"time"
 	
@@ -20,7 +21,9 @@ type CallbackRequest struct {
 	Error      string
 }
 
-// ProcessCallback 在一个事务内完成回调校验，幂等处理，状态流转
+// ProcessCallback 在一个事务内完成回调的三重校验（agent_id/attempt/lease_epoch）、
+// 幂等处理、状态流转、租约释放和事件记录。
+// 任何校验不匹配都返回 ErrStaleCallback（HTTP 409），防止旧 Agent 的回调覆盖新结果。
 func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackRequest) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -102,6 +105,17 @@ func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackReque
 	
 	// 记录事件
 	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, event, agent_id, attempt)VALUES ($1, $2, $3, $4)`, req.TaskID, string(req.Status), req.AgentID, req.Attempt)
+	if err != nil {
+		return mapError(err)
+	}
+	
+	//写入 outbox事件
+	payload, _ := json.Marshal(map[string]any{
+		"status":  req.Status,
+		"attempt": req.Attempt,
+		"error":   req.Error,
+	})
+	_, err = tx.Exec(ctx, `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ($1, $2, $3)`+"task."+string(req.Status), req.TaskID, payload)
 	if err != nil {
 		return mapError(err)
 	}

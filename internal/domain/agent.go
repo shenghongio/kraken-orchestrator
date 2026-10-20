@@ -2,6 +2,7 @@ package domain
 
 import "time"
 
+// AgentStatus 表示Agent的运行状态
 type AgentStatus string
 
 const (
@@ -10,6 +11,7 @@ const (
 	AgentStatusDraining AgentStatus = "draining"
 )
 
+// Agent 是执行任务的工作节点
 type Agent struct {
 	ID             string
 	Status         AgentStatus
