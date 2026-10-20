@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
+	
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
@@ -34,20 +34,44 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 	task.UpdatedAt = utc
 	task.Status = domain.TaskStatusPending
 	task.Version = 1
-
+	
 	// 业务层不关心 payload 时也能正常插入
 	if len(task.Payload) == 0 {
 		task.Payload = []byte("{}")
 	}
-
-	_, err := r.pool.Exec(ctx, `
+	
+	if task.IdempotencyKey == "" {
+		_, err := r.pool.Exec(ctx, `
 		INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,
 							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			task.ID, task.Type, task.Priority, task.Status, task.Payload, task.IdempotencyKey,
+			task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested,
+			task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version,
+		)
+		return mapError(err)
+	}
+	
+	// 有 idempotency_key: on confklict do nothing
+	tag, err := r.pool.Exec(ctx, `
+							INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,
+							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (idempotency_key) DO NOTHING`,
 		task.ID, task.Type, task.Priority, task.Status, task.Payload, task.IdempotencyKey,
 		task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested,
-		task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version,
-	)
-	return mapError(err)
+		task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version)
+	
+	if err != nil {
+		return mapError(err)
+	}
+	if tag.RowsAffected() == 1 {
+		return nil // 插入成功
+	}
+	// 冲突,已存在,查处已有任务会填
+	existing, err := r.GetByIdempotencyKey(ctx, task.IdempotencyKey)
+	if err != nil {
+		return err
+	}
+	*task = *existing
+	return nil
 }
 
 // GetByID 按ID查询
@@ -84,13 +108,16 @@ func (r *TaskRepository) List(ctx context.Context) ([]*domain.Task, error) {
 	return tasks, rows.Err()
 }
 
-// RequestCancel 设置取消标记，乐观锁更新
+// RequestCancel 设置取消标记，只允许取消 pending/running 且尚未请求取消的任务
+// 已取消或已终止的任务返回 ErrNotFound
 func (r *TaskRepository) RequestCancel(ctx context.Context, id domain.TaskID) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE tasks SET cancel_requested = TRUE,updated_at = $2 WHERE id = $1 AND status IN
-                                     ('pending','running')`, id, time.Now().UTC())
+	tag, err := r.pool.Exec(ctx, `UPDATE tasks SET cancel_requested = TRUE,updated_at = $2 
+		WHERE id = $1 AND status IN ('pending','running') AND cancel_requested = FALSE`,
+		id, time.Now().UTC())
 	if err != nil {
 		return mapError(err)
 	}
+	// RowsAffected == 0 说明任务不存在、已终止、或已请求取消
 	if tag.RowsAffected() == 0 {
 		return domain.ErrNotFound
 	}
@@ -104,7 +131,7 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 		return nil, mapError(err)
 	}
 	defer tx.Rollback(ctx)
-
+	
 	var taskID domain.TaskID
 	err = tx.QueryRow(ctx, `SELECT id FROM tasks WHERE status = 'pending' AND cancel_requested = FALSE AND next_run_at <= NOW()
 								ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&taskID)
@@ -123,7 +150,7 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 	if err != nil {
 		return nil, mapError(err)
 	}
-
+	
 	_, err = tx.Exec(ctx, `INSERT INTO task_attempts (task_id, agent_id, attempt, lease_epoch, status, started_at) VALUES
                                 ($1, $2, $3, $4, 'running'), $5`,
 		taskID, agentID, attempt, leaseEpoch, now)
@@ -137,12 +164,12 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 	if err != nil {
 		return nil, mapError(err)
 	}
-
+	
 	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, event, agent_id, attempt)VALUES ($1, 'claimed', $2, $3)`, taskID, agentID, attempt)
 	if err != nil {
 		return nil, mapError(err)
 	}
-
+	
 	// 写入outbox事件，与任务状态变更在同一个事务内
 	payload, _ := json.Marshal(map[string]any{
 		"attempt":     attempt,
@@ -153,7 +180,7 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 	if err != nil {
 		return nil, mapError(err)
 	}
-
+	
 	if err := tx.Commit(ctx); err != nil {
 		return nil, mapError(err)
 	}
@@ -193,7 +220,7 @@ func scanTask(s rowScanner) (*domain.Task, error) {
 	var currentAgentID, errMsg *string
 	var result []byte
 	var nextRunAt time.Time
-
+	
 	err := s.Scan(
 		&t.ID, &t.Type, &t.Priority, &t.Status, &t.Payload, &t.IdempotencyKey,
 		&t.MaxRetries, &t.Attempt, &currentAgentID, &t.LeaseEpoch,
