@@ -51,7 +51,7 @@ func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackReque
 	
 	// 幂等： 读取当前 attempt记录，判断是否已是终态
 	var attemptStatus domain.AttemptStatus
-	err = tx.QueryRow(ctx, `SELECT status FROM task_attempts WHERE task_id = $1 AND attempt = $2`, req.AgentID, req.Attempt).Scan(&attemptStatus)
+	err = tx.QueryRow(ctx, `SELECT status FROM task_attempts WHERE task_id = $1 AND attempt = $2`, req.TaskID, req.Attempt).Scan(&attemptStatus)
 	if err != nil {
 		return mapError(err)
 	}
@@ -115,7 +115,7 @@ func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackReque
 		"attempt": req.Attempt,
 		"error":   req.Error,
 	})
-	_, err = tx.Exec(ctx, `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ($1, $2, $3)`+"task."+string(req.Status), req.TaskID, payload)
+	_, err = tx.Exec(ctx, `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ($1, $2, $3)`, "task."+string(req.Status), req.TaskID, payload)
 	if err != nil {
 		return mapError(err)
 	}

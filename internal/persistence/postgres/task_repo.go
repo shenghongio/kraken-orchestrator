@@ -39,23 +39,29 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 	if len(task.Payload) == 0 {
 		task.Payload = []byte("{}")
 	}
-	
+
+	// 空字符串的 idempotency_key 转成 nil，否则唯一索引会把多个 "" 视为冲突
+	var idempotencyKey any
+	if task.IdempotencyKey != "" {
+		idempotencyKey = task.IdempotencyKey
+	}
+
 	if task.IdempotencyKey == "" {
 		_, err := r.pool.Exec(ctx, `
 		INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,
 							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-			task.ID, task.Type, task.Priority, task.Status, task.Payload, task.IdempotencyKey,
+			task.ID, task.Type, task.Priority, task.Status, task.Payload, idempotencyKey,
 			task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested,
 			task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version,
 		)
 		return mapError(err)
 	}
-	
-	// 有 idempotency_key: on confklict do nothing
+
+	// 有 idempotency_key: on conflict do nothing
 	tag, err := r.pool.Exec(ctx, `
 							INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,
-							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (idempotency_key) DO NOTHING`,
-		task.ID, task.Type, task.Priority, task.Status, task.Payload, task.IdempotencyKey,
+							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
+		task.ID, task.Type, task.Priority, task.Status, task.Payload, idempotencyKey,
 		task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested,
 		task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version)
 	
@@ -152,7 +158,7 @@ func (r *TaskRepository) ClaimTask(ctx context.Context, agentID string) (*ClaimR
 	}
 	
 	_, err = tx.Exec(ctx, `INSERT INTO task_attempts (task_id, agent_id, attempt, lease_epoch, status, started_at) VALUES
-                                ($1, $2, $3, $4, 'running'), $5`,
+                                ($1, $2, $3, $4, 'running',$5)`,
 		taskID, agentID, attempt, leaseEpoch, now)
 	if err != nil {
 		return nil, mapError(err)
@@ -217,12 +223,12 @@ type rowScanner interface {
 
 func scanTask(s rowScanner) (*domain.Task, error) {
 	var t domain.Task
-	var currentAgentID, errMsg *string
+	var currentAgentID, errMsg, idempotencyKey *string
 	var result []byte
 	var nextRunAt time.Time
-	
+
 	err := s.Scan(
-		&t.ID, &t.Type, &t.Priority, &t.Status, &t.Payload, &t.IdempotencyKey,
+		&t.ID, &t.Type, &t.Priority, &t.Status, &t.Payload, &idempotencyKey,
 		&t.MaxRetries, &t.Attempt, &currentAgentID, &t.LeaseEpoch,
 		&t.CancelRequested, &result, &errMsg,
 		&nextRunAt, &t.CreatedAt, &t.UpdatedAt, &t.Version,
@@ -232,6 +238,9 @@ func scanTask(s rowScanner) (*domain.Task, error) {
 	}
 	if currentAgentID != nil {
 		t.CurrentAgentID = *currentAgentID
+	}
+	if idempotencyKey != nil {
+		t.IdempotencyKey = *idempotencyKey
 	}
 	t.Result = result
 	if errMsg != nil {
