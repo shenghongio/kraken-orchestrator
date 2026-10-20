@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-
+	
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
@@ -23,7 +23,7 @@ func NewCallbackHandler(taskRepo *postgres.TaskRepository, logger *slog.Logger) 
 type CallbackRequest struct {
 	TaskID     string          `json:"task_id"`
 	AgentID    string          `json:"agent_id"`
-	Attempts   int             `json:"attempts"`
+	Attempt    int             `json:"attempt"`
 	LeaseEpoch int64           `json:"lease_epoch"`
 	Status     string          `json:"status"`
 	Result     json.RawMessage `json:"result"`
@@ -39,7 +39,7 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
 		return
 	}
-	if req.TaskID == "" || req.AgentID == "" || req.Attempts == 0 || req.LeaseEpoch == 0 {
+	if req.TaskID == "" || req.AgentID == "" || req.Attempt == 0 || req.LeaseEpoch == 0 {
 		writeError(w, http.StatusBadRequest, "task_id, agent_id, attempt, lease_epoch are required", "invalid_input")
 		return
 	}
@@ -49,7 +49,7 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "status must be one of: success,failed cancelled", "invalid_input")
 		return
 	}
-
+	
 	var result []byte
 	if len(req.Result) > 0 {
 		result = []byte(req.Result)
@@ -57,7 +57,7 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 	err := handler.taskRepo.ProcessCallback(r.Context(), &postgres.CallbackRequest{
 		TaskID:     req.TaskID,
 		AgentID:    req.AgentID,
-		Attempt:    req.Attempts,
+		Attempt:    req.Attempt,
 		LeaseEpoch: req.LeaseEpoch,
 		Status:     status,
 		Result:     result,
