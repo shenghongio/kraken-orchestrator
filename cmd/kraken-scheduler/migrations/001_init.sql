@@ -1,5 +1,5 @@
 -- 任务表
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
     id              TEXT PRIMARY KEY,
     type            TEXT NOT NULL,
     priority        INTEGER NOT NULL DEFAULT 5,
@@ -24,12 +24,12 @@ CREATE TABLE tasks (
     version         INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE INDEX idx_tasks_status_next_run ON tasks(status, next_run_at);
-CREATE INDEX idx_tasks_idempotency_key ON tasks(idempotency_key);
-CREATE INDEX idx_tasks_current_agent ON tasks(current_agent_id) WHERE current_agent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_status_next_run ON tasks(status, next_run_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_idempotency_key ON tasks(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_tasks_current_agent ON tasks(current_agent_id) WHERE current_agent_id IS NOT NULL;
 
 -- 任务尝试表
-CREATE TABLE task_attempts (
+CREATE TABLE IF NOT EXISTS task_attempts (
     id            BIGSERIAL PRIMARY KEY,
     task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     agent_id      TEXT NOT NULL,
@@ -43,11 +43,11 @@ CREATE TABLE task_attempts (
     ended_at      TIMESTAMPTZ
 );
 
-CREATE INDEX idx_task_attempts_task ON task_attempts(task_id);
-CREATE UNIQUE INDEX idx_task_attempts_task_attempt ON task_attempts(task_id, attempt);
+CREATE INDEX  IF NOT EXISTS idx_task_attempts_task ON task_attempts(task_id);
+CREATE UNIQUE INDEX  IF NOT EXISTS idx_task_attempts_task_attempt ON task_attempts(task_id, attempt);
 
 -- 任务租约表
-CREATE TABLE task_leases (
+CREATE TABLE IF NOT EXISTS task_leases (
     task_id       TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     agent_id      TEXT NOT NULL,
     attempt       INTEGER NOT NULL,
@@ -56,10 +56,10 @@ CREATE TABLE task_leases (
     renewed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_task_leases_expires ON task_leases(expires_at);
+CREATE INDEX IF NOT EXISTS idx_task_leases_expires ON task_leases(expires_at);
 
 -- Agent 表
-CREATE TABLE agents (
+CREATE TABLE IF NOT EXISTS agents (
     id              TEXT PRIMARY KEY,
     status          TEXT NOT NULL DEFAULT 'offline',
     version         TEXT,
@@ -72,7 +72,7 @@ CREATE TABLE agents (
 );
 
 -- 任务事件表（审计/日志）
-CREATE TABLE task_events (
+CREATE TABLE IF NOT EXISTS task_events (
     id         BIGSERIAL PRIMARY KEY,
     task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     event      TEXT NOT NULL,
@@ -82,10 +82,10 @@ CREATE TABLE task_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_task_events_task ON task_events(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);
 
 -- 事务出箱表
-CREATE TABLE outbox_events (
+CREATE TABLE IF NOT EXISTS outbox_events (
     id          BIGSERIAL PRIMARY KEY,
     event_type  TEXT NOT NULL,
     task_id     TEXT,
@@ -95,4 +95,4 @@ CREATE TABLE outbox_events (
     published_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_outbox_pending ON outbox_events(published, created_at) WHERE published = FALSE;
+CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_events(published, created_at) WHERE published = FALSE;

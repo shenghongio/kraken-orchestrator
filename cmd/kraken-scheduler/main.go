@@ -48,11 +48,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("error loading scheduler config: %w", err)
 	}
-	
 	// 初始化logger
 	logger := observability.InitLogger(loadSchedulerConfig.Log.Level, loadSchedulerConfig.Log.Format)
-	logger.Info("scheduler started", slog.String("addr", loadSchedulerConfig.HTTP.Addr), slog.String("db_dsn", observability.Redact("dsn", loadSchedulerConfig.DB.DSN)))
-	
+	logger.Info("scheduler started.....")
+	logger.Info("scheduler config path", slog.String("log_level", loadSchedulerConfig.Log.Level), slog.String("log_format", loadSchedulerConfig.Log.Format), slog.String("addr", loadSchedulerConfig.HTTP.Addr))
 	//  初始化上下文
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()

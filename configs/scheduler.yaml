@@ -1,6 +1,6 @@
 log:
-  level: warn
-  format: json
+  level: info
+  format: debug
 http:
   addr: ":8080"
 db:
