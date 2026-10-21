@@ -6,8 +6,8 @@ import (
 )
 
 type CliConfig struct {
-	SchedulerURL string `koanf:"scheduler.url"`
-	Log          LogConfig
+	SchedulerURL string    `koanf:"scheduler.url"`
+	Log          LogConfig `koanf:"log"`
 }
 
 func DefaultCliConfig() CliConfig {

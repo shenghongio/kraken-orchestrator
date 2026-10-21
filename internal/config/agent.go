@@ -6,8 +6,8 @@ import (
 )
 
 type AgentConfig struct {
-	Log  LogConfig
-	HTTP HTTPConfig // agent 本地debug/metrics HTTP
+	Log  LogConfig  `koanf:"log"`
+	HTTP HTTPConfig `koanf:"http"`
 
 	SchedulerURL   string   `koanf:"scheduler.url"`
 	AgentID        string   `koanf:"agent.id"`

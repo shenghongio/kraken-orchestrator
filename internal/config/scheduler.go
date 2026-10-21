@@ -7,10 +7,10 @@ import (
 )
 
 type SchedulerConfig struct {
-	Log   LogConfig
-	HTTP  HTTPConfig
-	DB    DBConfig
-	Redis RedisConfig
+	Log   LogConfig   `koanf:"log"`
+	HTTP  HTTPConfig  `koanf:"http"`
+	DB    DBConfig    `koanf:"db"`
+	Redis RedisConfig `koanf:"redis"`
 
 	LeaseTTL            time.Duration `koanf:"lease.ttl"`
 	LeaseReaperInterval time.Duration `koanf:"lease.reaper_interval"`

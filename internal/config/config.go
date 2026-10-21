@@ -12,26 +12,26 @@ import (
 )
 
 type LogConfig struct {
-	Level  string `koanf:"log.level"`
-	Format string `koanf:"log.format"`
+	Level  string `koanf:"level"`
+	Format string `koanf:"format"`
 }
 
 type HTTPConfig struct {
-	Addr         string        `koanf:"http.addr"`
-	ReadTimeout  time.Duration `koanf:"http.read_timeout"`
-	WriteTimeout time.Duration `koanf:"http.write_timeout"`
+	Addr         string        `koanf:"addr"`
+	ReadTimeout  time.Duration `koanf:"read_timeout"`
+	WriteTimeout time.Duration `koanf:"write_timeout"`
 }
 
 type DBConfig struct {
-	DSN             string        `koanf:"db.dsn"`
-	MaxOpenConns    int           `koanf:"db.max_open_conns"`
-	MaxIdleConns    int           `koanf:"db.max_idle_conns"`
-	ConnMaxLifetime time.Duration `koanf:"db.conn_max_lifetime"`
+	DSN             string        `koanf:"dsn"`
+	MaxOpenConns    int           `koanf:"max_open_conns"`
+	MaxIdleConns    int           `koanf:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `koanf:"conn_max_lifetime"`
 }
 type RedisConfig struct {
-	Addr     string `koanf:"redis.addr"`
-	Password string `koanf:"redis.password"`
-	DB       int    `koanf:"redis.db"`
+	Addr     string `koanf:"addr"`
+	Password string `koanf:"password"`
+	DB       int    `koanf:"db"`
 }
 
 func Load(configFile string, delimiters ...string) (*koanf.Koanf, error) {
