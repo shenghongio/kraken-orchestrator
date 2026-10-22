@@ -3,7 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
 
@@ -43,7 +43,7 @@ func (r *CallbackOutboxRepository) ListPending(ctx context.Context) ([]*Callback
 		return nil, err
 	}
 	defer queryContext.Close()
-	
+
 	var items []*CallbackOutbox
 	for queryContext.Next() {
 		var cb CallbackOutbox

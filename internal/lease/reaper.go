@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"time"
-	
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
@@ -27,7 +27,7 @@ func NewReaper(pool *pgxpool.Pool, logger *slog.Logger, interval time.Duration) 
 func (r *Reaper) Run(ctx context.Context) {
 	ticher := time.NewTicker(r.interval)
 	defer ticher.Stop()
-	
+
 	r.logger.Info("lease reaper started", slog.Duration("interval", r.interval))
 	for {
 		select {
@@ -40,7 +40,7 @@ func (r *Reaper) Run(ctx context.Context) {
 			}
 		}
 	}
-	
+
 }
 
 // sweep 扫描过期租约并回收，最多100个租约，逐个回收
@@ -85,10 +85,10 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 		return err
 	}
 	defer tx.Rollback(ctx)
-	
+
 	// 锁定任务行
 	var status domain.TaskStatus
-	
+
 	var taskAttempt, maxRetries int
 	var taskLeaseEpoch int64
 	err = tx.QueryRow(ctx, `SELECT status, attempt, max_retries, lease_epoch FROM tasks WHERE id = $1 FOR UPDATE`,
@@ -96,7 +96,7 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 	if err != nil {
 		return err
 	}
-	
+
 	// fencing 校验: 如果lease_epoch 不匹配，说明任务已被重新申领，只需删除旧lease
 	if taskLeaseEpoch != leaseEpoch {
 		_, err := tx.Exec(ctx, `DELETE FROM task_leases WHERE task_id = $1 AND lease_epoch = $2`, taskID, leaseEpoch)
@@ -105,7 +105,7 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 		}
 		return tx.Commit(ctx)
 	}
-	
+
 	// 只有running 状态的任务才需要回收
 	if status != domain.TaskStatusRunning {
 		_, err := tx.Exec(ctx, `DELETE FROM task_leases WHERE task_id = $1`, taskID)
@@ -138,7 +138,7 @@ func (r *Reaper) reclaim(ctx context.Context, taskID domain.TaskID, agentID stri
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, event, agent_id, attempt) VALUES ($1, 'lease_expired', $2, $3)`, taskID, agentID, attempt)
-	
+
 	if err != nil {
 		return err
 	}
@@ -159,6 +159,6 @@ func nextBackoff(attempt int) time.Duration {
 		d = max
 	}
 	jitter := time.Duration(rand.Int63n(int64(d)/2 + 1))
-	
+
 	return d/2 + jitter
 }

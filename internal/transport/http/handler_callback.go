@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
@@ -49,7 +49,7 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "status must be one of: success,failed cancelled", "invalid_input")
 		return
 	}
-	
+
 	var result []byte
 	if len(req.Result) > 0 {
 		result = []byte(req.Result)

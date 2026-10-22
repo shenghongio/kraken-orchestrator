@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
 
@@ -28,12 +28,12 @@ func TestClaimTask_Concurrent(t *testing.T) {
 	// newTaskRepo 会连接数据库，并 TRUNCATE task表保证干净状态
 	testRepo, cleanup := newTestRepo(t)
 	defer cleanup()
-	
+
 	ctx := context.Background()
-	
+
 	// 创建 10个pending 状态的任务
 	// 这些任务创建后默认 status = pending 等待被申领
-	
+
 	const taskCount = 0
 	for i := 0; i < taskCount; i++ {
 		task := &domain.Task{
@@ -44,7 +44,7 @@ func TestClaimTask_Concurrent(t *testing.T) {
 			t.Fatalf("create task: %v", err)
 		}
 	}
-	
+
 	// 准备并发收集结果
 	// claimed 记录每个 taskID 被申领的次数，正常情况下应该都是 1
 	var (
@@ -52,7 +52,7 @@ func TestClaimTask_Concurrent(t *testing.T) {
 		claimed = make(map[domain.TaskID]int) // taskID -> 被申领次数
 		wg      sync.WaitGroup                //等待所有 goroutine 完成
 	)
-	
+
 	// 开 20个goroutine 同时 申领
 	// goroutine 数量 20 > 任务数量(10),故意制造竞争
 	// 每个goroutine  内部循环申领，直到领不到任务(ClaimTask 返回nil)
@@ -80,7 +80,7 @@ func TestClaimTask_Concurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	
+
 	// 验证不重复分配
 	// len(claimed) 应该等于 taskCount 说明所有任务都被获取了
 	if len(claimed) != taskCount {
@@ -92,7 +92,7 @@ func TestClaimTask_Concurrent(t *testing.T) {
 			t.Errorf("task %s claimed %d times,want 1 (duplicate assignment!)", id, count)
 		}
 	}
-	
+
 	// 验证状态流转
 	// 所有任务被获取后，status 应该从 pending 变为 running,attempt 为1
 	tasks, err := testRepo.List(ctx)
@@ -128,7 +128,7 @@ func TestClaimTask_Concurrent(t *testing.T) {
 func TestProcessCallback_StaleLeaseEpoch(t *testing.T) {
 	repo, cleanup := newTestRepo(t)
 	defer cleanup()
-	
+
 	ctx := context.Background()
 	// 创建任务并且获取该任务
 	task := &domain.Task{
@@ -145,13 +145,13 @@ func TestProcessCallback_StaleLeaseEpoch(t *testing.T) {
 	if result == nil {
 		t.Fatalf("expected a task result is nil")
 	}
-	
+
 	// result.LeaseEpoch 是当前有效的 fencing token
-	
+
 	// 用旧的lease_epoch(当前值 -1)回调
 	// 模拟旧 Agent 在lease 过期后才上报结果的场景
 	// 应该返回 ErrStalecallback ，拒绝这个过时的回调
-	
+
 	err = repo.ProcessCallback(ctx, &CallbackRequest{
 		TaskID:     string(result.Task.ID),
 		AgentID:    "agent-task-1",
@@ -162,10 +162,10 @@ func TestProcessCallback_StaleLeaseEpoch(t *testing.T) {
 	if err != domain.ErrStaleCallback {
 		t.Fatalf("expected ErrStaleCallback for stale lease_epoch got: %v", err)
 	}
-	
+
 	// 用正确的lease_epoch 回调
 	// 应该成功，任务状态为 success
-	
+
 	err = repo.ProcessCallback(ctx, &CallbackRequest{
 		TaskID:     string(result.Task.ID),
 		AgentID:    "agent-task-1",
@@ -176,7 +176,7 @@ func TestProcessCallback_StaleLeaseEpoch(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected nil for correct lease_epoch got: %v", err)
 	}
-	
+
 	// 验证任务最终状态
 	id, err := repo.GetByID(ctx, result.Task.ID)
 	if err != nil {
@@ -185,29 +185,31 @@ func TestProcessCallback_StaleLeaseEpoch(t *testing.T) {
 	if id.Status != domain.TaskStatusSuccess {
 		t.Errorf("status = %s, want %s", id.Status, domain.TaskStatusSuccess)
 	}
-	
+
 }
 
-//测试 5：幂等创建（相同 idempotency_key 返回同一任务）
+// 测试 5：幂等创建（相同 idempotency_key 返回同一任务）
 // =============================================================================
 //
 // 业务背景：
-//   客户端因网络超时重试创建任务请求，可能发起多次。
-//   如果没有幂等保护，会创建多个相同的任务。
+//
+//	客户端因网络超时重试创建任务请求，可能发起多次。
+//	如果没有幂等保护，会创建多个相同的任务。
 //
 // 核心机制：
 //   - 数据库层：idempotency_key 有唯一约束（迁移 003）
 //   - repo 层：INSERT ... ON CONFLICT DO NOTHING，冲突时查出已有任务回填
 //
 // 测试目的：
-//   验证用相同 idempotency_key 创建两次，DB 中只有一条记录，
-//   且第二次返回的任务 ID 与第一次相同。
+//
+//	验证用相同 idempotency_key 创建两次，DB 中只有一条记录，
+//	且第二次返回的任务 ID 与第一次相同。
 func TestCreate_Idempotent(t *testing.T) {
 	repo, cleanup := newTestRepo(t)
 	defer cleanup()
 	ctx := context.Background()
 	key := "idem-key-001"
-	
+
 	// 第一次创建任务
 	task1 := &domain.Task{
 		ID:             domain.NewTaskID(),
@@ -217,7 +219,7 @@ func TestCreate_Idempotent(t *testing.T) {
 	if err := repo.Create(ctx, task1); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	
+
 	// 第二次创建 (相同 key,但故意用不用的ID)
 	// 模拟客户端重试: 同一个业务请求，生成了不同的 task ID
 	task2 := &domain.Task{
@@ -228,13 +230,13 @@ func TestCreate_Idempotent(t *testing.T) {
 	if err := repo.Create(ctx, task2); err != nil {
 		t.Fatalf("second task: %v", err)
 	}
-	
+
 	// 验证 task2 被回填为 task1 的内容
 	// repo.Create 在冲突时会吧已有任务的内容拷贝到task参数中
 	if task2.ID != task1.ID {
 		t.Errorf("idempotency task ID =%s, want %s (should return existing task)", task2.ID, task1.ID)
 	}
-	
+
 	// 验证 DB中只有一条记录
 	// 唯一约束保证不会插入第二条
 	tasks, err := repo.List(ctx)

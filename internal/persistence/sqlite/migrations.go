@@ -36,5 +36,5 @@ func RunMigrations(db *sql.DB) error {
 		return fmt.Errorf("run sqlite migration failed error: %w", err)
 	}
 	return nil
-	
+
 }

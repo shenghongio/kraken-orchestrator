@@ -27,9 +27,9 @@ COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 LDFLAGS    := -s -w \
-              -X main.version=$(VERSION) \
-              -X main.commit=$(COMMIT) \
-              -X main.buildTime=$(BUILD_TIME)
+              -X $(MODULE)/internal/version.Version=$(VERSION) \
+              -X $(MODULE)/internal/version.Commit=$(COMMIT) \
+              -X $(MODULE)/internal/version.BuildTime=$(BUILD_TIME)
 
 # ============================================================
 #  带时间戳的日志函数

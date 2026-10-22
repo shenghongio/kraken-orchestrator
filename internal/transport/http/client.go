@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"time"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
 
@@ -33,7 +33,7 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-//RegisterRequest Agent 注册请求
+// RegisterRequest Agent 注册请求
 type RegisterRequest struct {
 	AgentID        string   `json:"agent_id"`
 	Version        string   `json:"version"`
@@ -52,7 +52,7 @@ func (c *Client) Register(ctx context.Context, req *RegisterAgentRequest) error 
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return readError(resp)
 	}
@@ -70,7 +70,7 @@ func (c *Client) Heartbeat(ctx context.Context, req *HeartbeatRequest) error {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode == http.StatusNotFound {
 		return domain.ErrNotFound
 	}
@@ -91,7 +91,7 @@ func (c *Client) Claim(ctx context.Context, req *ClaimTaskRequest) (*ClaimTaskRe
 		return nil, err
 	}
 	defer resp.Body.Close()
-	
+
 	// 204 No Content: 没有可申领的任务
 	if resp.StatusCode == http.StatusNoContent {
 		return nil, nil
@@ -99,7 +99,7 @@ func (c *Client) Claim(ctx context.Context, req *ClaimTaskRequest) (*ClaimTaskRe
 	if resp.StatusCode != http.StatusOK {
 		return nil, readError(resp)
 	}
-	
+
 	var claimResp ClaimTaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&claimResp); err != nil {
 		return nil, fmt.Errorf("decode claim response: %w", err)
@@ -118,7 +118,7 @@ func (c *Client) SendCallback(ctx context.Context, req *CallbackRequest) error {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	switch resp.StatusCode {
 	case http.StatusNoContent, http.StatusOK:
 		return nil
@@ -131,7 +131,7 @@ func (c *Client) SendCallback(ctx context.Context, req *CallbackRequest) error {
 	}
 }
 
-//do 发送HTTP 请求
+// do 发送HTTP 请求
 func (c *Client) do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	withContext, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {

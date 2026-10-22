@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/config"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/executor"
@@ -22,7 +22,7 @@ type Runtime struct {
 	registry     *executor.Registry               //Executor 注册表
 	checkpoint   *sqlite.CheckpointRepository     // 本地 checkpoint 存储
 	callbackRepo *sqlite.CallbackOutboxRepository // 本地回调 outbox
-	
+
 	// 并发控制,最多同时执行 maxConcurrency个任务  缓冲大小 = maxConcurrency 限制同时执行的任务数量
 	slots     chan struct{}
 	busySlots int        // 当前忙碌槽位数,(通过mu保护)
@@ -52,7 +52,7 @@ func RunRuntime(
 // 流程：注册 → 心跳 → flush 回调 → 申领执行循环
 func (r *Runtime) Run(ctx context.Context) {
 	r.logger.Info("agent runtime started", slog.String("agent_id", r.cfg.AgentID), slog.Int("max_concurrency", r.cfg.MaxConcurrency))
-	
+
 	// 注册 Agent
 	capabilities := make([]string, 0, len(r.registry.Types()))
 	for _, t := range r.registry.Types() {
@@ -67,16 +67,16 @@ func (r *Runtime) Run(ctx context.Context) {
 		r.logger.Error("register agent failed", slog.String("agent_id", r.cfg.AgentID), slog.Any("err", err))
 		return
 	}
-	
+
 	// 重启对账：处理上次奔溃时未完成的任务
 	r.reconcile(ctx)
-	
+
 	// 启动心跳 goroutine （定期上报 busy_slots）
 	go r.heartbeatLoop(ctx)
-	
+
 	// 启动 回调
 	go r.flushCallbackLoop(ctx)
-	
+
 	// 主循环: 领取任务
 	ticker := time.NewTicker(r.cfg.ClaimInterval)
 	defer ticker.Stop()
@@ -112,7 +112,7 @@ func (r *Runtime) claimAndExecute(ctx context.Context) {
 		<-r.slots
 		return
 	}
-	
+
 	// 有任务，占用槽位并启动 goroutine 执行
 	r.incBusySlots()
 	go func() {
@@ -129,7 +129,7 @@ func (r *Runtime) claimAndExecute(ctx context.Context) {
 func (r *Runtime) executeTask(ctx context.Context, claim *krakenhttp.ClaimTaskResponse) {
 	taskID := domain.TaskID(claim.TaskID)
 	r.logger.Info("executing task", slog.String("task_id", string(taskID)), slog.Int("attempt", claim.Attempt), slog.Int64("lease_epoch", claim.LeaseEpoch))
-	
+
 	// 先写 checkpoint表，保证重启可以恢复
 	if err := r.checkpoint.Save(ctx, &sqlite.Checkpoint{
 		TaskID:     taskID,
@@ -141,7 +141,7 @@ func (r *Runtime) executeTask(ctx context.Context, claim *krakenhttp.ClaimTaskRe
 		r.logger.Error("save checkpoint failed", slog.String("task_id", string(taskID)), slog.Any("err", err))
 		return
 	}
-	
+
 	// 构造 domain.Task 给 executor 使用
 	task := &domain.Task{
 		ID:      taskID,
@@ -149,7 +149,7 @@ func (r *Runtime) executeTask(ctx context.Context, claim *krakenhttp.ClaimTaskRe
 		Payload: claim.Payload,
 		Attempt: claim.Attempt,
 	}
-	
+
 	// 查找 executor
 	exec, ok := r.registry.Get(task.Type)
 	if !ok {
@@ -157,18 +157,18 @@ func (r *Runtime) executeTask(ctx context.Context, claim *krakenhttp.ClaimTaskRe
 		r.reportResult(ctx, taskID, claim, "failed", nil, "no executor for task type")
 		return
 	}
-	
+
 	// 执行任务（待可取消 context）
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	
+
 	result, err := exec.Execute(execCtx, task)
 	if err != nil {
 		r.logger.Error("executor failed", slog.String("task_id", string(taskID)), slog.Any("err", err))
 		r.reportResult(ctx, taskID, claim, "failed", nil, err.Error())
 		return
 	}
-	
+
 	// 跟进执行结果上报
 	status := "success"
 	errMsg := ""
@@ -194,10 +194,10 @@ func (r *Runtime) reportResult(ctx context.Context, taskID domain.TaskID, claim 
 		r.logger.Error("enqueue callback failed", slog.String("task_id", string(taskID)), slog.Int("attempt", claim.Attempt), slog.Any("err", err))
 		return
 	}
-	
+
 	//  2. 立即尝试发送（可能因网络失败，下次 flush 会重试）
 	r.flushCallbacks(ctx)
-	
+
 	// 更新 checkpoint 状态
 	if err := r.checkpoint.Save(ctx, &sqlite.Checkpoint{
 		TaskID:     taskID,
@@ -231,7 +231,7 @@ func (r *Runtime) flushCallbacks(ctx context.Context) {
 		r.logger.Error("list pending callbacks  failed", slog.String("err", err.Error()))
 		return
 	}
-	
+
 	for _, callback := range listPending {
 		err := r.client.SendCallback(ctx, &krakenhttp.CallbackRequest{
 			TaskID:     string(callback.TaskID),
@@ -303,7 +303,7 @@ func (r *Runtime) reconcile(ctx context.Context) {
 	if len(cps) == 0 {
 		return
 	}
-	
+
 	r.logger.Info("reconciling unfinished tasks", slog.Int("count", len(cps)))
 	for _, cp := range cps {
 		// 主动上报 failed ，Scheduler 会更加重试策略处理
@@ -325,7 +325,7 @@ func (r *Runtime) reconcile(ctx context.Context) {
 			// 网络错误，保留 checkpoint 下次重试
 			r.logger.With("reconcile callback failed,will retry", slog.String("task_id", string(cp.TaskID)), slog.Any("err", err))
 			continue
-			
+
 		}
 		// 上报成功 删除 checkpoint
 		if err := r.checkpoint.Delete(ctx, cp.TaskID); err != nil {

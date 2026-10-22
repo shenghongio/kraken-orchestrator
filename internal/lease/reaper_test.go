@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 	"time"
-	
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
@@ -49,9 +49,9 @@ func getTestPool(t *testing.T) *pgxpool.Pool {
 func TestReaper_ExpiredLEase(t *testing.T) {
 	pool := getTestPool(t)
 	defer pool.Close()
-	
+
 	ctx := context.Background()
-	
+
 	// 用postgres.TaskRepository 创建并且获取任务
 	taskRepo := postgres.NewTaskRepository(pool, time.Minute)
 	task := &domain.Task{
@@ -69,7 +69,7 @@ func TestReaper_ExpiredLEase(t *testing.T) {
 	if claimTask == nil {
 		t.Fatal("claim task is nil")
 	}
-	
+
 	// 手动让 lease 过期 (expires_at 设为 1 小时前)
 	_, err = pool.Exec(ctx, `UPDATE task_leases SET expires_at = NOW() - INTERVAL '1 hour' WHERE task_id = $1`, claimTask.Task.ID)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestReaper_ExpiredLEase(t *testing.T) {
 	if err := reaper.sweep(ctx); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	
+
 	// 验证：attempt=1 > max_retries=0，应标为 failed
 	got, err := taskRepo.GetByID(ctx, claimTask.Task.ID)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestReaper_ExpiredLEase(t *testing.T) {
 		t.Errorf("status = %s, want failed (attempt %d > max_retries %d)",
 			got.Status, got.Attempt, got.MaxRetries)
 	}
-	
+
 	// 验证：lease 已被删除
 	var count int
 	if err := pool.QueryRow(ctx,
@@ -101,7 +101,7 @@ func TestReaper_ExpiredLEase(t *testing.T) {
 	if count != 0 {
 		t.Errorf("lease count = %d, want 0", count)
 	}
-	
+
 }
 
 // TestReaper_ExpiredLeaseRetry 验证可重试任务过期后回到 pending
@@ -109,9 +109,9 @@ func TestReaper_ExpiredLEase(t *testing.T) {
 func TestReaper_ExpiredLeaseRetry(t *testing.T) {
 	pool := getTestPool(t)
 	defer pool.Close()
-	
+
 	ctx := context.Background()
-	
+
 	taskRepo := postgres.NewTaskRepository(pool, time.Minute)
 	task := &domain.Task{
 		ID:         domain.NewTaskID(),
@@ -128,7 +128,7 @@ func TestReaper_ExpiredLeaseRetry(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected a task, got nil")
 	}
-	
+
 	// 让 lease 过期
 	_, err = pool.Exec(ctx,
 		`UPDATE task_leases SET expires_at = NOW() - INTERVAL '1 hour' WHERE task_id = $1`,
@@ -136,12 +136,12 @@ func TestReaper_ExpiredLeaseRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expire lease: %v", err)
 	}
-	
+
 	reaper := NewReaper(pool, slog.New(slog.NewTextHandler(io.Discard, nil)), time.Minute)
 	if err := reaper.sweep(ctx); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	
+
 	// 验证：attempt=1 <= max_retries=3，应回到 pending
 	got, err := taskRepo.GetByID(ctx, result.Task.ID)
 	if err != nil {

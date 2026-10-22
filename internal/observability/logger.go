@@ -1,14 +1,16 @@
 package observability
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 )
 
 var sensitiveKeys = []string{
 	"password", "secret", "token", "api_key", "apikey",
-	"credential", "dsn", "private_key",
+	"credential", "dsn", "private_key", "authorization",
 }
 
 func InitLogger(level, format string) *slog.Logger {
@@ -26,7 +28,8 @@ func InitLogger(level, format string) *slog.Logger {
 		lvl = slog.LevelInfo
 	}
 	opts := &slog.HandlerOptions{
-		Level: lvl,
+		Level:       lvl,
+		ReplaceAttr: replaceAttr,
 	}
 	var handler slog.Handler
 	switch format {
@@ -50,6 +53,11 @@ func WithRequestID(logger *slog.Logger, requestID string) *slog.Logger {
 	return logger.With(slog.String("request_id", requestID))
 }
 
+// WithLeaseEpoch 附加 lease_epoch 字段，用于追踪 fencing token。
+func WithLeaseEpoch(logger *slog.Logger, leaseEpoch int64) *slog.Logger {
+	return logger.With(slog.Int64("lease_epoch", leaseEpoch))
+}
+
 // Redact 这个 Redact 是手动调用的工具函数。在 ReplaceAttr 回调里也可以自动脱敏，但自动脱敏容易误伤，建议在记录含密钥字段时显式调用 Redact。
 func Redact(key string, value string) string {
 	lower := strings.ToLower(key)
@@ -59,4 +67,68 @@ func Redact(key string, value string) string {
 		}
 	}
 	return value
+}
+
+// replaceAttr 在日志输出前自动脱敏，命中敏感词的字符串替换为 ************
+func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if a.Value.Kind() == slog.KindString {
+		key := strings.ToLower(a.Key)
+		for _, sk := range sensitiveKeys {
+			if strings.Contains(key, sk) {
+				return slog.String(a.Key, "************")
+			}
+		}
+	}
+	return a
+}
+
+// Stack 返回当前调用栈的文本表示，跳过 observability 包自身的帧
+// 用于在debug/error 日志中附加堆栈，方便定位问题
+func Stack() string {
+	const maxFrames = 32
+	pcs := make([]uintptr, maxFrames)
+	n := runtime.Callers(3, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	var b strings.Builder
+	for {
+		frame, more := frames.Next()
+		fmt.Fprintf(&b, "\n%s:%d %s", frame.File, frame.Line, frame.Function)
+		if !more {
+			break
+		}
+	}
+	return b.String()
+}
+
+// ErrAttr 返回一个带堆栈的error日志属性
+// 统一错误日志格式: message +stack 都在error group 下
+func ErrAttr(err error) slog.Attr {
+	if err == nil {
+		return slog.Any("error", nil)
+	}
+	return slog.Group("error", slog.String("message", err.Error()), slog.String("stack", Stack()))
+}
+
+// RedactMap 对 map中的敏感字段做脱敏，返回新的map（不修改原,map）
+// 用于在 debug日志中安全地输出请求参数
+func RedactMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		lower := strings.ToLower(k)
+		sensitive := false
+		for _, sk := range sensitiveKeys {
+			if strings.Contains(lower, sk) {
+				sensitive = true
+				break
+			}
+		}
+		if sensitive {
+			out[k] = "************"
+		} else if inner, ok := v.(map[string]any); ok {
+			out[k] = RedactMap(inner)
+		} else {
+			out[k] = v
+		}
+	}
+	return out
 }

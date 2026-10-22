@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"time"
-	
+
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
 
@@ -66,14 +66,14 @@ func (r *CheckpointRepository) ListRunning(ctx context.Context) ([]*Checkpoint, 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	defer func(row *sql.Rows) {
 		err := row.Close()
 		if err != nil {
-		
+
 		}
 	}(row)
-	
+
 	var cps []*Checkpoint
 	for row.Next() {
 		var cp Checkpoint
@@ -89,5 +89,5 @@ func (r *CheckpointRepository) ListRunning(ctx context.Context) ([]*Checkpoint, 
 func (r *CheckpointRepository) Delete(ctx context.Context, taskID domain.TaskID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM checkpoint WHERE task_id = ?`, taskID)
 	return err
-	
+
 }
