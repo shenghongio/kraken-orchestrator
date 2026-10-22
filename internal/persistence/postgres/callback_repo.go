@@ -27,13 +27,14 @@ type CallbackRequest struct {
 func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackRequest) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("callback.begin_tx", "", nil, err)
 	}
 	defer tx.Rollback(ctx)
 	
 	// 锁定任务行
-	task, err := scanTask(tx.QueryRow(ctx, `SELECT id, type, priority, status, payload, idempotency_key,max_retries, attempt, current_agent_id, lease_epoch,
-		cancel_requested, result, error,next_run_at, created_at, updated_at, version FROM tasks WHERE id = $1 FOR UPDATE`, req.TaskID))
+	selectQuery := `SELECT id, type, priority, status, payload, idempotency_key,max_retries, attempt, current_agent_id, lease_epoch,cancel_requested, result, error,next_run_at, created_at, updated_at, version,
+				    FROM tasks WHERE id = $1 FOR UPDATE`
+	task, err := scanTask(tx.QueryRow(ctx, selectQuery, req.TaskID), "callback.select_tack", selectQuery, []any{req.TaskID})
 	if err != nil {
 		return err
 	}
@@ -51,9 +52,11 @@ func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackReque
 	
 	// 幂等： 读取当前 attempt记录，判断是否已是终态
 	var attemptStatus domain.AttemptStatus
-	err = tx.QueryRow(ctx, `SELECT status FROM task_attempts WHERE task_id = $1 AND attempt = $2`, req.TaskID, req.Attempt).Scan(&attemptStatus)
+	attemptQuery := `SELECT status FROM task_attempts WHERE task_id = $1 AND attempt = $2`
+	attemptArgs := []any{req.TaskID, req.Attempt}
+	err = tx.QueryRow(ctx, attemptQuery, attemptArgs...).Scan(&attemptStatus)
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("callback.get_attempt", attemptQuery, attemptArgs, err)
 	}
 	if attemptStatus != domain.AttemptStatusRunning {
 		if attemptStatus == req.Status {
@@ -62,7 +65,7 @@ func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackReque
 		return domain.ErrStaleCallback
 	}
 	
-	// 决定 tasl 新状态
+	// 决定 task新状态
 	now := time.Now().UTC()
 	var newStatus domain.TaskStatus
 	var nextRunAt time.Time
@@ -84,29 +87,33 @@ func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackReque
 	}
 	
 	// 更新任务
-	_, err = tx.Exec(ctx, `UPDATE tasks SET status = $2, result = $3, error = $4,current_agent_id = NULL, next_run_at = $5, updated_at = $6 WHERE id = $1`,
-		req.TaskID, newStatus, req.Result, req.Error, nextRunAt, now)
+	updateQuery := `UPDATE tasks SET status = $2, result = $3, error = $4,current_agent_id = NULL, next_run_at = $5, updated_at = $6 WHERE id = $1`
+	updateArgs := []any{req.TaskID, newStatus, req.Result, req.Error, nextRunAt, now}
+	_, err = tx.Exec(ctx, updateQuery, updateArgs)
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("callback.update_task", updateQuery, updateArgs, err)
 	}
 	// 更新 attempt 终态
-	_, err = tx.Exec(ctx, `
-		UPDATE task_attempts SET status = $2, result = $3, error = $4, ended_at = $5 WHERE task_id = $1 AND attempt = $6`,
-		req.TaskID, req.Status, req.Result, req.Error, now, req.Attempt)
+	updateAttemptQuery := `UPDATE task_attempts SET status = $2, result = $3, error = $4, ended_at = $5 WHERE task_id = $1 AND attempt = $6`
+	updateAttemptArgs := []any{req.TaskID, newStatus, req.Result, req.Error, req.Attempt}
+	_, err = tx.Exec(ctx, updateAttemptQuery, updateAttemptArgs...)
 	if err != nil {
 		return mapError(err)
 	}
 	
 	// 删除租约
-	_, err = tx.Exec(ctx, "DELETE FROM task_leases WHERE task_id = $1", req.TaskID)
+	deleteLeaseQuery := "DELETE FROM task_leases WHERE task_id = $1"
+	_, err = tx.Exec(ctx, deleteLeaseQuery, req.TaskID)
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("callback.delete_lease", deleteLeaseQuery, []any{req.TaskID}, err)
 	}
 	
 	// 记录事件
-	_, err = tx.Exec(ctx, `INSERT INTO task_events (task_id, event, agent_id, attempt)VALUES ($1, $2, $3, $4)`, req.TaskID, string(req.Status), req.AgentID, req.Attempt)
+	eventQuery := `INSERT INTO task_events (task_id, event, agent_id, attempt)VALUES ($1, $2, $3, $4)`
+	eventArgs := []any{req.TaskID, string(req.Status), req.AgentID, req.Attempt}
+	_, err = tx.Exec(ctx, eventQuery, eventArgs...)
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("callback.insert_event", eventQuery, eventArgs, err)
 	}
 	
 	//写入 outbox事件
@@ -115,11 +122,13 @@ func (r *TaskRepository) ProcessCallback(ctx context.Context, req *CallbackReque
 		"attempt": req.Attempt,
 		"error":   req.Error,
 	})
-	_, err = tx.Exec(ctx, `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ($1, $2, $3)`, "task."+string(req.Status), req.TaskID, payload)
+	outboxQuery := `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ($1, $2, $3)`
+	outboxArgs := []any{"task." + string(req.Status), req.TaskID, payload}
+	_, err = tx.Exec(ctx, outboxQuery, outboxArgs...)
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("callback.insert_outbox", outboxQuery, outboxArgs, err)
 	}
-	return mapError(tx.Commit(ctx))
+	return wrapSQLError("callback.commit", "", nil, tx.Commit(ctx))
 }
 
 // nextBackoff 指数退避 + jitter 上限 10 分钟

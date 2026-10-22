@@ -39,34 +39,30 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 	if len(task.Payload) == 0 {
 		task.Payload = []byte("{}")
 	}
-
+	
 	// 空字符串的 idempotency_key 转成 nil，否则唯一索引会把多个 "" 视为冲突
 	var idempotencyKey any
 	if task.IdempotencyKey != "" {
 		idempotencyKey = task.IdempotencyKey
 	}
-
-	if task.IdempotencyKey == "" {
-		_, err := r.pool.Exec(ctx, `
-		INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,
-							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-			task.ID, task.Type, task.Priority, task.Status, task.Payload, idempotencyKey,
-			task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested,
-			task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version,
-		)
-		return mapError(err)
-	}
-
-	// 有 idempotency_key: on conflict do nothing
-	tag, err := r.pool.Exec(ctx, `
-							INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,
-							next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
-		task.ID, task.Type, task.Priority, task.Status, task.Payload, idempotencyKey,
-		task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested,
-		task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version)
 	
+	if task.IdempotencyKey == "" {
+		query := `INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`
+		args := []any{task.ID, task.Type, task.Priority, task.Status, task.Payload, idempotencyKey, task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested, task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version}
+		_, err := r.pool.Exec(ctx, query, args...)
+		return wrapSQLError("task.create", query, args, err)
+	}
+	
+	// 有 idempotency_key: on conflict do nothing
+	query := `INSERT INTO tasks (id,type,priority, status, payload,idempotency_key, max_retries,attempt,lease_epoch,cancel_requested,next_run_at,created_at,updated_at,version)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14),
+			  ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`
+	args := []any{
+		task.ID, task.Type, task.Priority, task.Status, task.Payload, idempotencyKey, task.MaxRetries, task.Attempt, task.LeaseEpoch, task.CancelRequested,
+		task.NextRunAt, task.CreatedAt, task.UpdatedAt, task.Version,
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("task.create", query, args, err)
 	}
 	if tag.RowsAffected() == 1 {
 		return nil // 插入成功
@@ -82,30 +78,27 @@ func (r *TaskRepository) Create(ctx context.Context, task *domain.Task) error {
 
 // GetByID 按ID查询
 func (r *TaskRepository) GetByID(ctx context.Context, id domain.TaskID) (*domain.Task, error) {
-	return scanTask(r.pool.QueryRow(ctx, `
-		SELECT id, type, priority, status, payload, idempotency_key, max_retries, attempt,current_agent_id,lease_epoch,cancel_requested,result,error,
-		next_run_at,created_at,updated_at,version FROM tasks WHERE id = $1`, id))
+	query := `SELECT id, type, priority, status, payload, idempotency_key, max_retries, attempt,current_agent_id,lease_epoch,cancel_requested,result,error,next_run_at,created_at,updated_at,version FROM tasks WHERE id = $1`
+	return scanTask(r.pool.QueryRow(ctx, query, id), "task.get_by_id", query, []any{id})
 }
 
 // GetByIdempotencyKey 幂等查询
 func (r *TaskRepository) GetByIdempotencyKey(ctx context.Context, idempotencyKey string) (*domain.Task, error) {
-	return scanTask(r.pool.QueryRow(ctx, `
-			SELECT id,type,priority,status,payload,idempotency_key, max_retries,attempt,current_agent_id,lease_epoch, cancel_requested,result,error,
-			next_run_at,created_at,updated_at,version FROM tasks WHERE idempotency_key = $1`, idempotencyKey))
+	query := `SELECT id,type,priority,status,payload,idempotency_key, max_retries,attempt,current_agent_id,lease_epoch, cancel_requested,result,error,next_run_at,created_at,updated_at,version FROM tasks WHERE idempotency_key = $1`
+	return scanTask(r.pool.QueryRow(ctx, query, idempotencyKey), "task.get_by_idempotency_key", query, []any{idempotencyKey})
 }
 
 // List 简单列表，Phase 1 不加分页
 func (r *TaskRepository) List(ctx context.Context) ([]*domain.Task, error) {
-	rows, err := r.pool.Query(ctx, `
-			SELECT id, type, priority, status, payload, idempotency_key, max_retries, attempt,current_agent_id,lease_epoch,
-			cancel_requested,result,error, next_run_at,created_at,updated_at,version FROM tasks ORDER BY created_at DESC`)
+	query := `SELECT id, type, priority, status, payload, idempotency_key, max_retries, attempt,current_agent_id,lease_epoch,cancel_requested,result,error, next_run_at,created_at,updated_at,version FROM tasks ORDER BY created_at DESC`
+	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, wrapSQLError("task.list", query, nil, err)
 	}
 	defer rows.Close()
 	var tasks []*domain.Task
 	for rows.Next() {
-		t, err := scanTask(rows)
+		t, err := scanTask(rows, "task.list.scan", query, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -221,12 +214,12 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanTask(s rowScanner) (*domain.Task, error) {
+func scanTask(s rowScanner, operation, query string, args []any) (*domain.Task, error) {
 	var t domain.Task
 	var currentAgentID, errMsg, idempotencyKey *string
 	var result []byte
 	var nextRunAt time.Time
-
+	
 	err := s.Scan(
 		&t.ID, &t.Type, &t.Priority, &t.Status, &t.Payload, &idempotencyKey,
 		&t.MaxRetries, &t.Attempt, &currentAgentID, &t.LeaseEpoch,
@@ -234,7 +227,7 @@ func scanTask(s rowScanner) (*domain.Task, error) {
 		&nextRunAt, &t.CreatedAt, &t.UpdatedAt, &t.Version,
 	)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, wrapSQLError(operation, query, args, err)
 	}
 	if currentAgentID != nil {
 		t.CurrentAgentID = *currentAgentID
