@@ -3,10 +3,12 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
+	"github.com/shenghongio/kraken-orchestrator/internal/observability"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
 
@@ -71,8 +73,10 @@ func toTaskResponse(t *domain.Task) TaskResponse {
 // Create POST /v1/tasks
 // 幂等由 repo 层保证（ON CONFLICT DO NOTHING），handler 无需先查再插
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	var req CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Debug("create task:  invalid request body parse error", observability.ErrAttr(err))
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
 		return
 	}
@@ -83,7 +87,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(req.Payload) == 0 {
 		req.Payload = json.RawMessage(`{}`)
 	}
-
+	logger.Debug("create task", slog.String("type", string(req.Type)), slog.Int("priority", req.Priority), slog.Int("max_retries", req.MaxRetries), slog.String("idempotency_key", req.IdempotencyKey))
 	task := &domain.Task{
 		ID:             domain.NewTaskID(),
 		Type:           req.Type,
@@ -93,20 +97,26 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MaxRetries:     req.MaxRetries,
 	}
 	if err := h.repo.Create(r.Context(), task); err != nil {
+		logger.Error("create task failed", slog.String("type", string(req.Type)), observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "create task failed", "internal")
 		return
 	}
+
+	logger.Debug("create task success", slog.String("task_id", string(task.ID)), slog.String("task_type", string(task.Type)))
 	// 新任务或幂等命中的已有任务，统一返回 200
 	writeJSON(w, http.StatusOK, toTaskResponse(task))
 }
 
 // List GET /v1/tasks
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	tasks, err := h.repo.List(r.Context())
 	if err != nil {
+		logger.Error("list tasks failed", observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "list tasks failed", "internal")
 		return
 	}
+	logger.Debug("list tasks", slog.Int("count", len(tasks)))
 	// 转换为 DTO 列表
 	resp := make([]TaskResponse, 0, len(tasks))
 	for _, t := range tasks {
@@ -117,6 +127,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // GetById GET /v1/tasks/{id}
 func (h *TaskHandler) GetById(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "task id is required", "invalid_input")
@@ -128,25 +139,30 @@ func (h *TaskHandler) GetById(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found", "not_found")
 			return
 		}
+		logger.Error("get task id failed", slog.String("task_id", id), observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "get task failed", "internal")
 		return
 	}
+	logger.Debug("get task", slog.String("task_id", string(task.ID)), slog.String("status", string(task.Status)), slog.Int("attempt", task.Attempt))
 	writeJSON(w, http.StatusOK, toTaskResponse(task))
 }
 
 // Cancel POST /v1/tasks/{id}/cancel
 func (h *TaskHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "task id is required", "invalid_input")
 		return
 	}
+	logger.Debug("cancel task", slog.String("task_id", id))
 	if err := h.repo.RequestCancel(r.Context(), domain.TaskID(id)); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			// 任务不存在、已终止、或已请求取消
 			writeError(w, http.StatusNotFound, "task not found, already cancelled, or terminal", "not_found")
 			return
 		}
+		logger.Error("cancel task failed", slog.String("task_id", id), observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "cancel task failed", "internal")
 		return
 	}

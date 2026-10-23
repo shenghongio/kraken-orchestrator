@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
@@ -9,10 +10,52 @@ import (
 	"time"
 )
 
+type ctxKey int
+
+const (
+	requestIDKey ctxKey = iota
+	loggerKey
+)
+
+// RequestIDFromContext 从 context 总取出请求 ID,工handler 层使用
+func RequestIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(loggerKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// LoggerFromContext 从 context 中取出请求级 logger 附带 request_id/method/path/ip
+// 如果 Context 中没有 Logger,返回一个discard，避免 nil panic
+func LoggerFromContext(ctx context.Context) *slog.Logger {
+	if l, ok := ctx.Value(loggerKey).(*slog.Logger); ok {
+		return l
+	}
+	return slog.Default()
+}
+
+// RequestLogger 创建请求级 logger，附带 request_id/method/path/ip，存入 context
+// 必须在 RequestID 之后执行，handler 层通过 LoggerFromContext 获取
+func RequestLogger(logger *slog.Logger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqLogger := logger.With(
+				slog.String("request_id", RequestIDFromContext(r.Context())),
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.String("ip", r.RemoteAddr),
+			)
+			ctx := context.WithValue(r.Context(), loggerKey, reqLogger)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 // 为每个http请求添加一个唯一的请求ID
 // 通过 crypto/rand 生成 16 字节的随机数，再用 hex.EncodeToString 转成 32 字符的十六进制字符串作为 Request ID。
 // 同时写入请求头 X-Request-Id（供下游 handler 读取）和响应头（供客户端/日志关联）。
 // 使用 crypto/rand 而非 math/rand，保证 ID 的唯一性和不可预测性。
+//RequestId 为每个 http 请求添加唯一请求id, 同时写入请求头  X-Request-ID 响应 ,以及 context （提供后续中间件/handler读取）
 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -21,7 +64,8 @@ func RequestID(next http.Handler) http.Handler {
 		reqID := hex.EncodeToString(b)
 		r.Header.Set("X-Request-Id", reqID)
 		w.Header().Set("X-Request-Id", reqID)
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), requestIDKey, reqID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -39,14 +83,10 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					logger.Error("panic recovered",
-						slog.String("method", r.Method),
-						slog.String("path", r.URL.Path),
-						slog.String("ip", r.RemoteAddr),
-						slog.String("trace", string(debug.Stack())),
-						slog.String("status", http.StatusText(http.StatusInternalServerError)),
-						slog.Any("panic", rec),
-					)
+					l := LoggerFromContext(r.Context())
+					l.Error("recovered from panic", slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.String("ip", r.RemoteAddr),
+						slog.String("trace", string(debug.Stack())), slog.String("status", http.StatusText(http.StatusInternalServerError)),
+						slog.Any("panic", rec))
 					writeError(w, http.StatusInternalServerError, "internal server error", "internal")
 				}
 			}()
@@ -70,7 +110,8 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				status:         http.StatusOK,
 			}
 			next.ServeHTTP(rw, r)
-			logger.Info("request",
+			l := LoggerFromContext(r.Context())
+			l.Info("request",
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.String("ip", r.RemoteAddr),

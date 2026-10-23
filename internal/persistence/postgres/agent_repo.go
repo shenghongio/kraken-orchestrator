@@ -28,30 +28,36 @@ func (r *AgentRepository) UpsertAgent(ctx context.Context, agent *domain.Agent) 
 	if agent.Status == "" {
 		agent.Status = domain.AgentStatusOnline
 	}
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO agents (id, status, version, capabilities, max_concurrency,busy_slots, last_heartbeat, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status,version = EXCLUDED.version,capabilities = EXCLUDED.capabilities,max_concurrency = EXCLUDED.max_concurrency,updated_at = EXCLUDED.updated_at
-	`,
+
+	const query = `
+					INSERT INTO agents (id, status, version, capabilities, max_concurrency,busy_slots, last_heartbeat, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status,version = EXCLUDED.version,capabilities = EXCLUDED.capabilities,max_concurrency = EXCLUDED.max_concurrency,updated_at = EXCLUDED.updated_at`
+
+	args := []any{
 		agent.ID, agent.Status, agent.Version, agent.Capabilities,
 		agent.MaxConcurrency, agent.BusySlots, utc, agent.CreatedAt, utc,
-	)
-	return mapError(err)
+	}
+	_, err := r.pool.Exec(ctx, query, args...)
+	return wrapSQLError("agent.upsert", query, args, err)
 }
 func (r *AgentRepository) GetAgent(ctx context.Context, id string) (*domain.Agent, error) {
-	return scanAgent(r.pool.QueryRow(ctx, `
-		SELECT id, status, version, capabilities, max_concurrency,busy_slots, last_heartbeat, created_at, updated_at FROM agents WHERE id = $1`, id))
+	const query = `
+		SELECT id, status, version, capabilities, max_concurrency,busy_slots, last_heartbeat, created_at, updated_at FROM agents WHERE id = $1`
+
+	return scanAgent(r.pool.QueryRow(ctx, query, id), "agent.get", query, []any{id})
 }
 
 func (r *AgentRepository) ListAgents(ctx context.Context) ([]*domain.Agent, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, status, version, capabilities, max_concurrency, busy_slots, last_heartbeat, created_at, updated_at FROM agents ORDER BY created_at DESC`)
+	const query = `
+		SELECT id, status, version, capabilities, max_concurrency, busy_slots, last_heartbeat, created_at, updated_at FROM agents ORDER BY created_at DESC`
+	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, wrapSQLError("agent.list", query, nil, err)
 	}
 	defer rows.Close()
 	var agents []*domain.Agent
 	for rows.Next() {
-		a, err := scanAgent(rows)
+		a, err := scanAgent(rows, "agent.list", query, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -63,9 +69,11 @@ func (r *AgentRepository) ListAgents(ctx context.Context) ([]*domain.Agent, erro
 // Heartbeat 更新 Agent 的最后心跳时间和当前忙碌槽位数
 func (r *AgentRepository) Heartbeat(ctx context.Context, id string, busySlots int) error {
 	newUtc := time.Now().UTC()
-	exec, err := r.pool.Exec(ctx, `UPDATE agents SET last_heartbeat = $2, busy_slots = $3, updated_at = $2 WHERE id = $1`, id, newUtc, busySlots)
+	const query = `UPDATE agents SET last_heartbeat = $2, busy_slots = $3, updated_at = $2 WHERE id = $1`
+	args := []any{id, busySlots, newUtc, newUtc}
+	exec, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return mapError(err)
+		return wrapSQLError("agent.heartbeat", query, args, err)
 	}
 	if exec.RowsAffected() == 0 {
 		return domain.ErrNotFound
@@ -74,14 +82,14 @@ func (r *AgentRepository) Heartbeat(ctx context.Context, id string, busySlots in
 
 }
 
-func scanAgent(s rowScanner) (*domain.Agent, error) {
+func scanAgent(s rowScanner, operation, query string, args []any) (*domain.Agent, error) {
 	var a domain.Agent
 	err := s.Scan(
 		&a.ID, &a.Status, &a.Version, &a.Capabilities, &a.MaxConcurrency,
 		&a.BusySlots, &a.LastHeartbeat, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, wrapSQLError(operation, query, args, err)
 	}
 	return &a, nil
 }

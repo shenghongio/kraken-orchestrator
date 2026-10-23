@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
+	"github.com/shenghongio/kraken-orchestrator/internal/observability"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
 
@@ -30,12 +31,13 @@ type CallbackRequest struct {
 	Error      string          `json:"error"`
 }
 
-// Callback  Callback POST /v1/callback
+// Callback  POST /v1/callback
 // Agent 上报任务执行结果(success/filed/cancelled)
 func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	var req CallbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handler.logger.Debug("")
+		logger.Debug("callback: invalid request body", observability.ErrAttr(err))
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
 		return
 	}
@@ -45,7 +47,7 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 	}
 	status := domain.AttemptStatus(req.Status)
 	if status != domain.AttemptStatusSuccess && status != domain.AttemptStatusFailed && status != domain.AttemptStatusCancelled {
-		handler.logger.Debug("")
+		logger.Debug("callback: invalid status", slog.String("status", req.Status))
 		writeError(w, http.StatusBadRequest, "status must be one of: success,failed cancelled", "invalid_input")
 		return
 	}
@@ -54,6 +56,9 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 	if len(req.Result) > 0 {
 		result = []byte(req.Result)
 	}
+	logger.Debug("callback received",
+		slog.String("task_id", req.TaskID), slog.String("agent_id", req.AgentID), slog.Int("attempt", req.Attempt),
+		slog.Int64("lease_epoch", req.LeaseEpoch), slog.String("status", req.Status))
 	err := handler.taskRepo.ProcessCallback(r.Context(), &postgres.CallbackRequest{
 		TaskID:     req.TaskID,
 		AgentID:    req.AgentID,
@@ -72,7 +77,9 @@ func (handler *CallbackHandler) Callback(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, domain.ErrInvalidStatusTransition):
 			writeError(w, http.StatusBadRequest, "invalid status", "invalid_input")
 		default:
-			writeError(w, http.StatusInternalServerError, "callback failed", "internal")
+			logger.Error("callback: process callback",
+				slog.String("task_id", req.TaskID), slog.String("agent_id", req.AgentID), slog.Int("attempt", req.Attempt),
+				slog.Int64("lease_epoch", req.LeaseEpoch), slog.String("status", req.Status), observability.ErrAttr(err))
 		}
 		return
 	}
