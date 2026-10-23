@@ -2,7 +2,8 @@ package redis
 
 import (
 	"context"
-
+	"time"
+	
 	"github.com/redis/go-redis/v9"
 )
 
@@ -11,12 +12,23 @@ type Client struct {
 	rbd *redis.Client
 }
 
-func NewRedisClient(addr string) *Client {
+// NewRedisClient 支持地址，密码和编号
+func NewRedisClient(addr, password string, db int) *Client {
 	return &Client{
 		rbd: redis.NewClient(&redis.Options{
-			Addr: addr,
+			Addr:         addr,
+			Password:     password,
+			DB:           db,
+			DialTimeout:  5 * time.Second,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 3 * time.Second,
 		}),
 	}
+}
+
+// Ping 检查Redis 连接是否可用
+func (c *Client) Ping(ctx context.Context) error {
+	return c.rbd.Ping(ctx).Err()
 }
 
 // Publish 向指定 channel 发布消息

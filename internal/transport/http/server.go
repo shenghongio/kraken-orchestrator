@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -66,10 +67,11 @@ func (s *Server) Start() error {
 	s.logger.Info("http server starting", slog.String("addr", s.cfg.HTTP.Addr))
 	return s.httpServer.ListenAndServe()
 }
-func (s *Server) Shutdown() error {
+
+// Shutdown 改为接收 context，并使用 http.Server.Shutdown 实现真正的优雅关闭（等待在途请求完成，而非 Close 立即断开)
+func (s *Server) Shutdown(ctx context.Context) error {
 	if s.httpServer == nil {
 		return nil
 	}
-
-	return s.httpServer.Close()
+	return s.httpServer.Shutdown(ctx)
 }
