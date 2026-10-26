@@ -85,7 +85,9 @@ func initRedis(cfg *config.SchedulerConfig, logger *slog.Logger) *redispkg.Clien
 	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(pingCtx); err != nil {
-		logger.Warn("redis ping failed, outbox events will be retried later", slog.Any("error", err))
+		logger.Warn("redis unavailable, outbox events will be buffered and retried after redis recovers",
+			slog.Any("error", err),
+			slog.String("note", "redis is notification channel only, task state stored in postgres"))
 	} else {
 		logger.Info("redis connection established")
 	}

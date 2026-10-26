@@ -2,14 +2,27 @@ package redis
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"time"
 	
 	"github.com/redis/go-redis/v9"
 )
 
+func init() {
+	redis.SetLogger(redisLogger{})
+}
+
+type redisLogger struct{}
+
 // Client 封装 redis 连接，目前仅用于 pub/sub 通知
 type Client struct {
 	rbd *redis.Client
+}
+
+func (redisLogger) Printf(ctx context.Context, format string, v ...any) {
+	// 丢弃 go-redis 内部日志，或用 slog.Debug 记录
+	slog.Default().DebugContext(ctx, fmt.Sprintf(format, v...))
 }
 
 // NewRedisClient 支持地址，密码和编号
