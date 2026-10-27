@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
+	"github.com/shenghongio/kraken-orchestrator/internal/observability"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 )
 
@@ -48,8 +49,10 @@ type HeartbeatRequest struct {
 // Register POST /v1/agent/register
 // Agent 注册或更新静态信息
 func (h *AgentHandler) Register(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	var req RegisterAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Debug("register agent: invalid request body", observability.ErrAttr(err))
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
 		return
 	}
@@ -61,6 +64,7 @@ func (h *AgentHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "max_concurrency must be positive", "invalid_input")
 		return
 	}
+	logger.Debug("register agent", slog.String("agent_id", req.AgentID), slog.String("version", req.Version), slog.Int("max_concurrency", req.MaxConcurrency), slog.Any("capabilities", req.Capabilities))
 	agent := &domain.Agent{
 		ID:             req.AgentID,
 		Status:         domain.AgentStatusOnline,
@@ -70,6 +74,7 @@ func (h *AgentHandler) Register(w http.ResponseWriter, r *http.Request) {
 		LastHeartbeat:  time.Now().UTC(),
 	}
 	if err := h.repo.UpsertAgent(r.Context(), agent); err != nil {
+		logger.Debug("register agent failed", slog.String("agent_id", req.AgentID), observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "register agent failed", "internal")
 		return
 	}
@@ -79,8 +84,10 @@ func (h *AgentHandler) Register(w http.ResponseWriter, r *http.Request) {
 // Heartbeat POST /v1/agent/heartbeat
 // 原子申领一个执行任务，无任务时返回204 code
 func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	var req HeartbeatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Debug("heartbeat: invalid request body", observability.ErrAttr(err))
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
 		return
 	}
@@ -92,12 +99,13 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "busy_slots must be non-negative", "invalid_input")
 		return
 	}
+	logger.Debug("heartbeat agent", slog.String("agent_id", req.AgentID), slog.Int("busy_slots", req.BusySlots))
 	if err := h.repo.Heartbeat(r.Context(), req.AgentID, req.BusySlots); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "agent not found", "not_found")
 			return
 		}
-		h.logger.Debug("heartbeat agent failed", slog.String("agent_id", req.AgentID), slog.Any("error", err))
+		logger.Error("heartbeat agent failed", slog.String("agent_id", req.AgentID), slog.Int("busy_slots", req.BusySlots), observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "heartbeat failed", "internal")
 		return
 	}
@@ -106,8 +114,10 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 
 // Claim POST /v1/agent/tasks/claim
 func (h *AgentHandler) Claim(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
 	var req ClaimTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Debug("claim task: invalid request body", observability.ErrAttr(err))
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
 		return
 	}
@@ -115,9 +125,10 @@ func (h *AgentHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent_id is required", "invalid_input")
 		return
 	}
+	logger.Debug("claim task", slog.String("agent_id", req.AgentID))
 	result, err := h.taskRepo.ClaimTask(r.Context(), req.AgentID)
 	if err != nil {
-		h.logger.Error("claim task failed", slog.String("agent_id", req.AgentID), slog.String("error", err.Error()))
+		logger.Error("claim task failed", slog.String("agent_id", req.AgentID), observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "claim task failed", "internal")
 		return
 	}
@@ -125,6 +136,7 @@ func (h *AgentHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	logger.Debug("claim task success", slog.String("agent_id", req.AgentID), slog.String("task_id", string(result.Task.ID)), slog.Int("attempt", result.Attempt), slog.Int64("lease_epoch", result.LeaseEpoch))
 	writeJSON(w, http.StatusOK, ClaimTaskResponse{
 		TaskID:     string(result.Task.ID),
 		Type:       string(result.Task.Type),

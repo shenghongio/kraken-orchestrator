@@ -10,7 +10,7 @@ Phase 2 的目标是构建完整的任务调度闭环：Agent 注册 → 任务�
 
 ---
 
-## 模块 1：Agent 注册与心跳
+## 模块 1：Agent 注册与心跳（已实现）
 
 ### 设计决策
 
@@ -37,7 +37,7 @@ ON CONFLICT (id) DO UPDATE SET
 
 ---
 
-## 模块 2：原子申领 + Leases + Fencing Tokens
+## 模块 2：原子申领 + Leases + Fencing Tokens（已实现）
 
 ### 设计决策
 
@@ -89,7 +89,7 @@ ClaimTask 在一个事务内完成：锁定任务 → 更新状态 → 插入 at
 
 ---
 
-## 模块 3：回调验证与幂等处理
+## 模块 3：回调验证与幂等处理（已实现）
 
 ### 设计决策
 
@@ -148,7 +148,7 @@ return d/2 + jitter
 
 ---
 
-## 模块 4：Lease Reaper
+## 模块 4：Lease Reaper（已实现）
 
 ### 设计决策
 
@@ -178,7 +178,7 @@ if taskLeaseEpoch != leaseEpoch {
 
 ---
 
-## 模块 5：事务性 Outbox + Redis 通知（待实现）
+## 模块 5：事务性 Outbox + Redis 通知（已实现）
 
 ### 核心设计
 
@@ -199,7 +199,7 @@ INSERT INTO outbox_events (event_type, task_id, payload) VALUES (...)
 
 ---
 
-## 模块 6：Agent 侧（待实现）
+## 模块 6：Agent 侧（已实现）
 
 ### 核心设计
 
@@ -244,3 +244,98 @@ tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 ```
 
 **为什么**：`ReadCommitted` 配合行级锁（`FOR UPDATE`）已经足够保证正确性，不需要 `Serializable`（性能差，容易死锁）。`FOR UPDATE` 保证同一行不会被并发修改，这是我们的核心需求。
+
+---
+
+## 模块 7：日志增强（已实现）
+
+目标是在 debug 时显示尽可能全面的信息，同时保证敏感数据不泄露。增强四个方面：debug 级别输出、错误调用栈、HTTP 请求分组、SQL 错误上下文。
+
+### 7.1 敏感字段自动脱敏
+
+`observability.NewLogger` 创建 handler 时注册 `ReplaceAttr` 回调，递归遍历所有 attr，对命中的敏感 key 自动替换为 `"[REDACTED]"`。
+
+脱敏字段列表：`password`、`token`、`dsn`、`authorization`、`secret`、`api_key`、`credential`。
+
+**为什么**：slog 的 `ReplaceAttr` 是结构化日志的统一出口，在一处拦截即可覆盖所有日志输出，避免每个调用点手动脱敏遗漏。对 map 类型的值递归脱敏（`RedactMap`），保证嵌套结构里的敏感字段也被处理。
+
+### 7.2 错误日志附带调用栈
+
+新增 `observability.ErrAttr(err)`，返回 `slog.Group("error", message, stack)`：
+
+```go
+func ErrAttr(err error) slog.Attr {
+    return slog.Group("error",
+        slog.String("message", err.Error()),
+        slog.String("stack", Stack()),
+    )
+}
+```
+
+`Stack()` 用 `runtime.Callers` 抓取调用栈，跳帧 3 层跳过 observability 包自身，从业务代码帧开始显示。
+
+**为什么**：
+- 统一错误输出结构，所有 error 日志都是 `error.message` + `error.stack`，便于检索和聚合
+- 调用栈帮助定位错误来源，尤其是 repo 层深处返回的错误
+- 跳帧避免日志里全是 `runtime.Callers` / `observability.Stack` 这些无关帧
+
+### 7.3 HTTP 请求日志分组
+
+中间件链顺序：`RequestID → RequestLogger → Recover → AccessLog → mux`。
+
+`RequestLogger` 从 context 取 `request_id`，构建请求级 logger（附带 `request_id`/`method`/`path`/`ip`），再存入 context。handler 和中间件通过 `LoggerFromContext(ctx)` 获取，同一次请求的所有日志自动携带 `request_id`。
+
+**为什么**：
+- 不需要每个日志调用手动传 `request_id`，避免遗漏
+- `Recover` 里的 panic 日志、`AccessLog` 的访问日志、handler 的业务日志都自动关联
+- `LoggerFromContext` fallback 到 `slog.Default()`，防止 context 无 logger 时 nil panic（如单元测试直接调 handler）
+
+### 7.4 SQL 错误封装
+
+新增 `SQLError` 结构体包装 `pgx.PgError`，保留 `errors.Is`/`As` 语义链：
+
+```go
+type SQLError struct {
+    Operation string   // 业务操作名，如 "task.claim.update_task"
+    Query     string   // 截断后的 SQL
+    Args      string   // 参数摘要（类型+长度，不含真实值）
+    SQLState  string
+    SQLCode   string
+    Detail    string
+    Routine   string
+    Cause     error
+}
+```
+
+`wrapSQLError(operation, query, args, err)` 统一包装：
+- `pgx.ErrNoRows` → `domain.ErrNotFound`（保持原语义）
+- 其他错误提取 `PgError` 字段（SQLState/Code/Detail/Routine）
+- `truncateQuery` 截断超长 SQL（默认 500 字符）
+- `formatArgs` 只输出参数类型和长度，不输出真实值
+
+**为什么**：
+- 出问题时能从日志直接看到是哪个操作、哪条 SQL、哪些参数，不用翻代码
+- 参数只输出类型和长度（如 `$1=string(8) $2=bytes(1024)`），避免 payload 中的敏感数据泄露
+- `Unwrap()` 返回原始错误，`errors.Is(err, domain.ErrNotFound)` 等判断完全兼容
+- 事务步骤（BeginTx/Commit）无 SQL，传空 query 和 nil args，仅用 operation 标识
+
+### 7.5 scanTask/scanAgent 签名变更
+
+```go
+func scanTask(s rowScanner, operation, query string, args []any) (*domain.Task, error)
+```
+
+扫描错误在内部直接用 `wrapSQLError` 包装，删除了原来的 `scanTaskWrap` 额外包装层。
+
+**为什么**：原来 `scanTask` 返回原始错误，调用方再用 `scanTaskWrap` 包一层，两层包装冗余且容易遗漏。直接让 `scanTask` 接收 operation/query/args，内部包装，调用方只需传入对应上下文即可。
+
+### 7.6 不包装的场景
+
+以下情况保持原样，不使用 `wrapSQLError`：
+
+- `RowsAffected() == 0` 返回 `domain.ErrNotFound`（业务判断，不是 SQL 错误）
+- 业务错误如 `domain.ErrStaleCallback`、`domain.ErrInvalidStatusTransition`（校验失败，正常分支）
+- `ClaimTask` 中 `select pending task` 的 `pgx.ErrNoRows` 返回 `nil, nil`（无任务可申领，正常情况）
+- `rows.Err()` 连接级错误
+
+**为什么**：这些不是数据库执行错误，包装后反而会丢失业务语义或产生误导。

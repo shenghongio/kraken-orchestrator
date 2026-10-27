@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -45,8 +46,12 @@ func (s *Server) Handler() http.Handler {
 
 	var handler http.Handler = mux
 
-	// 每次请求时嵌入调用
+	// 每次请求时嵌入调用 中间件顺序: RequestID → RequestLogger → Recover → AccessLog
+	// RequestLogger 必须在 RequestID 之后：因为 RequestLogger 要从 context 取 request_id 来构建请求级 logger。
+	// RequestLogger 必须在 Recover 和 AccessLog 之前：这样 panic 日志和访问日志都能通过 context 拿到带 request_id 的 logger。
+	// 完整顺序：RequestID → RequestLogger → Recover → AccessLog → mux。
 	handler = RequestID(handler)
+	handler = RequestLogger(s.logger)(handler)
 	handler = Recover(s.logger)(handler)
 	handler = AccessLog(s.logger)(handler)
 	return handler
@@ -62,10 +67,11 @@ func (s *Server) Start() error {
 	s.logger.Info("http server starting", slog.String("addr", s.cfg.HTTP.Addr))
 	return s.httpServer.ListenAndServe()
 }
-func (s *Server) Shutdown() error {
+
+// Shutdown 改为接收 context，并使用 http.Server.Shutdown 实现真正的优雅关闭（等待在途请求完成，而非 Close 立即断开)
+func (s *Server) Shutdown(ctx context.Context) error {
 	if s.httpServer == nil {
 		return nil
 	}
-
-	return s.httpServer.Close()
+	return s.httpServer.Shutdown(ctx)
 }

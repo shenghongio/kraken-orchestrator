@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
@@ -59,7 +59,7 @@ func (e *SQLError) Is(target error) bool {
 // 如果是pgx.ErrNoRows 则直接返回 domain.ErrNotFound （保持原有语意）
 // 如果是 domain.ErrNotFound 则原样返回
 func wrapSQLError(operation, query string, args []any, err error) error {
-	
+
 	if err == nil {
 		return nil
 	}
@@ -69,13 +69,14 @@ func wrapSQLError(operation, query string, args []any, err error) error {
 	if errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
-	
+
 	se := &SQLError{
 		Operation: operation,
 		Query:     truncateQuery(query),
 		Args:      formatArgs(args),
 		Cause:     err,
 	}
+	//Go 1.26 提供了类型安全的 errors.AsType
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		se.SQLState = pgErr.SQLState()
 		se.SQLCode = pgErr.Code
@@ -88,7 +89,7 @@ func wrapSQLError(operation, query string, args []any, err error) error {
 // truncateQuery 截断过长的SQL
 func truncateQuery(query string) string {
 	query = strings.TrimSpace(query)
-	if len(query) > maxQueryLogLen {
+	if len(query) <= maxQueryLogLen {
 		return query
 	}
 	return query[:maxQueryLogLen] + "...(truncated)"
@@ -105,7 +106,7 @@ func formatArgs(args []any) string {
 		case string:
 			parts = append(parts, fmt.Sprintf("$%d=string(%d)", i+1, len(v)))
 		case []byte:
-			parts = append(parts, fmt.Sprintf("$%d=bytes(%s)", i+1, string(v)))
+			parts = append(parts, fmt.Sprintf("$%d=bytes(%d)", i+1, len(v)))
 		default:
 			parts = append(parts, fmt.Sprintf("$%d=%T", i+1, a))
 		}

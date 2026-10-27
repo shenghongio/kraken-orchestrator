@@ -33,16 +33,19 @@ func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository {
 // Create 在指定事务那写入一条 outbox 事件
 // 必须传入 tx,确保业务状态变更在同一事务中提交
 func (repo *OutboxRepository) Create(ctx context.Context, tx pgx.Tx, eventType string, taskID domain.TaskID, payload []byte) error {
-	_, err := tx.Exec(ctx, `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ($1, $2, $3)`, eventType, taskID, payload)
+	const query = `INSERT INTO outbox_events (event_type, task_id, payload) VALUES ($1, $2, $3)`
+	args := []any{eventType, taskID, payload}
+	_, err := tx.Exec(ctx, query, args...)
 	return err
 }
 
 // ListPending 查询未发布的事件，按创建时间升序
 func (repo *OutboxRepository) ListPending(ctx context.Context, limit int) ([]*OutboxEvent, error) {
-	rows, err := repo.pool.Query(ctx, `SELECT id, event_type, task_id, payload, published, created_at, published_at FROM outbox_events WHERE published = FALSE ORDER BY created_at ASC LIMIT $1`,
-		limit)
+	const query = `SELECT id, event_type, task_id, payload, published, created_at, published_at FROM outbox_events WHERE published = FALSE ORDER BY created_at ASC LIMIT $1`
+	args := []any{limit}
+	rows, err := repo.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, wrapSQLError("outbox.list_pending", query, args, err)
 	}
 	defer rows.Close()
 
@@ -50,7 +53,7 @@ func (repo *OutboxRepository) ListPending(ctx context.Context, limit int) ([]*Ou
 	for rows.Next() {
 		var event OutboxEvent
 		if err := rows.Scan(&event.ID, &event.EventType, &event.TaskID, &event.Payload, &event.Published, &event.CreatedAt, &event.PublishedAt); err != nil {
-			return nil, mapError(err)
+			return nil, wrapSQLError("outbox.list_pending", query, args, err)
 		}
 		events = append(events, &event)
 	}
@@ -60,6 +63,8 @@ func (repo *OutboxRepository) ListPending(ctx context.Context, limit int) ([]*Ou
 // MarkPublished 标记事件已发布
 func (repo *OutboxRepository) MarkPublished(ctx context.Context, id int64) error {
 	now := time.Now().UTC()
-	_, err := repo.pool.Exec(ctx, `UPDATE outbox_events SET published = TRUE, published_at = $2 WHERE id = $1`, id, now)
-	return mapError(err)
+	const query = `UPDATE outbox_events SET published = TRUE, published_at = $2 WHERE id = $1`
+	args := []any{id, now}
+	_, err := repo.pool.Exec(ctx, query, args...)
+	return wrapSQLError("outbox.mark_published", query, args, err)
 }

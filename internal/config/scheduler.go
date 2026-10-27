@@ -11,10 +11,11 @@ type SchedulerConfig struct {
 	HTTP  HTTPConfig  `koanf:"http"`
 	DB    DBConfig    `koanf:"db"`
 	Redis RedisConfig `koanf:"redis"`
-
+	
 	LeaseTTL            time.Duration `koanf:"lease.ttl"`
 	LeaseReaperInterval time.Duration `koanf:"lease.reaper_interval"`
 	HeartbeatInterval   time.Duration `koanf:"heartbeat.interval"`
+	OutboxInterval      time.Duration `koanf:"outbox.interval"`
 }
 
 func DefaultSchedulerConfig() SchedulerConfig {
@@ -36,7 +37,9 @@ func DefaultSchedulerConfig() SchedulerConfig {
 		LeaseTTL:            60 * time.Second,
 		LeaseReaperInterval: 5 * time.Second,
 		HeartbeatInterval:   15 * time.Second,
+		OutboxInterval:      5 * time.Second,
 	}
+	
 }
 func LoadSchedulerConfig(configFile string) (*SchedulerConfig, error) {
 	lc, err := Load(configFile)
