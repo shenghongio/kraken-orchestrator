@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -19,7 +20,7 @@ const (
 
 // RequestIDFromContext 从 context 总取出请求 ID,工handler 层使用
 func RequestIDFromContext(ctx context.Context) string {
-	if id, ok := ctx.Value(loggerKey).(string); ok {
+	if id, ok := ctx.Value(requestIDKey).(string); ok {
 		return id
 	}
 	return ""
@@ -110,16 +111,42 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				status:         http.StatusOK,
 			}
 			next.ServeHTTP(rw, r)
+			if rw.status == http.StatusMethodNotAllowed {
+				allow := w.Header().Get("Access-Control-Allow-Origin")
+				msg := "method not allowed"
+				if allow == "" {
+					msg = "access control-allow-origin header empty" + allow
+				}
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				body, _ := json.Marshal(ErrorResponse{Error: msg, Code: "method_not_allowed"})
+				_, _ = w.Write(body)
+			}
 			l := LoggerFromContext(r.Context())
-			l.Info("request",
-				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
-				slog.String("ip", r.RemoteAddr),
+			args := []any{
 				slog.Duration("duration", time.Since(start)),
-				slog.String("request_id", r.Header.Get("X-Request-Id")),
 				slog.Int("status", rw.status),
-			)
-
+			}
+			switch {
+			case rw.status >= 500:
+				
+				l.Error("request", args...)
+			case rw.status >= 400:
+				l.Warn("request", args...)
+			case rw.status >= 300:
+			
+			default:
+				l.Info("request", args...)
+				
+			}
+			//l.Info("request",
+			//	slog.String("method", r.Method),
+			//	slog.String("path", r.URL.Path),
+			//	slog.String("ip", r.RemoteAddr),
+			//	slog.Duration("duration", time.Since(start)),
+			//	slog.String("request_id", r.Header.Get("X-Request-Id")),
+			//	slog.Int("status", rw.status),
+			//)
+			
 		})
 	}
 }

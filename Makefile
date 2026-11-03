@@ -9,7 +9,7 @@ MODULE     := github.com/shenghongio/kraken-orchestrator
 BIN_DIR    := bin
 
 # 三个可执行入口（按 AGENTS.md 约定）
-CMDS := kraken-scheduler kraken-agent krakenctl
+CMDS := kraken-api kraken-reaper kraken-outbox kraken-agent krakenctl
 
 # Go 工具
 GO         := go

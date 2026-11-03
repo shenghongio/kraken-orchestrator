@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 	"time"
-
+	
 	"github.com/shenghongio/kraken-orchestrator/internal/config"
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 )
@@ -26,14 +26,14 @@ func getTestDSN(t *testing.T) string {
 	if dsn := os.Getenv("KRAKEN_TEST_DSN"); dsn != "" {
 		return dsn
 	}
-	k, err := config.Load("configs/scheduler.yaml")
+	k, err := config.Load("configs/api.example.yaml")
 	if err != nil {
 		t.Skipf("skip: cannot load config: %v", err)
 		return ""
 	}
 	dsn := k.String("db.dsn")
 	if dsn == "" {
-		t.Skipf("skip: db.dsn not set in configs/scheduler.yaml: %v", err)
+		t.Skipf("skip: db.dsn not set in configs/api.example.yaml: %v", err)
 	}
 	return dsn
 }
@@ -45,7 +45,7 @@ func newTestRepo(t *testing.T) (*TaskRepository, func()) {
 	if err != nil {
 		t.Fatalf("failed to connect to postgres database: %v", err)
 	}
-
+	
 	// 清理测试数据
 	_, _ = pool.Exec(background, "TRUNCATE tasks CASCADE")
 	repository := NewTaskRepository(pool, time.Minute)
@@ -58,7 +58,7 @@ func newTestRepo(t *testing.T) (*TaskRepository, func()) {
 func TestTaskRepository_CreateAndGet(t *testing.T) {
 	repo, cleanup := newTestRepo(t)
 	defer cleanup()
-
+	
 	ctx := context.Background()
 	task := &domain.Task{
 		ID:         domain.NewTaskID(),
@@ -88,7 +88,7 @@ func TestTaskRepository_CreateAndGet(t *testing.T) {
 func TestTaskRepository_idempotency(t *testing.T) {
 	repo, clenaup := newTestRepo(t)
 	defer clenaup()
-
+	
 	ctx := context.Background()
 	key := "test-idempotency-key"
 	task1 := &domain.Task{
@@ -119,7 +119,7 @@ func TestTaskRepository_NotFound(t *testing.T) {
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("got %v, want %v", err, domain.ErrNotFound)
 	}
-
+	
 }
 func TestTaskRepository_List(t *testing.T) {
 	repo, cleanup := newTestRepo(t)

@@ -1,12 +1,17 @@
 package observability
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"os"
 	"runtime"
 	"strings"
+	
+	"github.com/lmittmann/tint"
 )
 
 var sensitiveKeys = []string{
@@ -36,7 +41,11 @@ func InitLogger(level, format string) *slog.Logger {
 	var handler slog.Handler
 	switch format {
 	case "text":
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		handler = tint.NewHandler(os.Stdout, &tint.Options{
+			Level:       lvl,
+			AddSource:   true,
+			ReplaceAttr: replaceAttr,
+		})
 	default:
 		handler = slog.NewJSONHandler(os.Stdout, opts)
 	}
@@ -119,7 +128,26 @@ func ErrAttr(err error) slog.Attr {
 	if err == nil {
 		return slog.Any("error", nil)
 	}
-	return slog.Group("error", slog.String("message", err.Error()), slog.Any("stack", stackFrames()))
+	group := []any{slog.String("message", err.Error())}
+	if !isClientError(err) {
+		group = append(group, slog.Any("stack", stackFrames()))
+	}
+	return slog.Group("error", group...)
+}
+
+// isClientError 判断是否为客户端可预期的输入错误
+// 这类错误打堆栈只有噪音，没有诊断价值
+func isClientError(err error) bool {
+	// 空请求体或截断
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	// JSON 格式错误 / 类型不匹配 / 目标结构不合法
+	switch err.(type) {
+	case *json.SyntaxError, *json.UnmarshalTypeError, *json.InvalidUnmarshalError:
+		return true
+	}
+	return false
 }
 
 // stackFrames 返回调用栈的字符串数组，每个元素一帧

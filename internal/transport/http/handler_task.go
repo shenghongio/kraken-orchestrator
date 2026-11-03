@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
-
+	
 	"github.com/shenghongio/kraken-orchestrator/internal/domain"
 	"github.com/shenghongio/kraken-orchestrator/internal/observability"
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
@@ -76,7 +76,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	logger := LoggerFromContext(r.Context())
 	var req CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.Debug("create task:  invalid request body parse error", observability.ErrAttr(err))
+		logger.Debug("create task: invalid request body parse error", observability.ErrAttr(err))
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
 		return
 	}
@@ -101,7 +101,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "create task failed", "internal")
 		return
 	}
-
+	
 	logger.Debug("create task success", slog.String("task_id", string(task.ID)), slog.String("task_type", string(task.Type)))
 	// 新任务或幂等命中的已有任务，统一返回 200
 	writeJSON(w, http.StatusOK, toTaskResponse(task))

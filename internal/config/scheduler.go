@@ -7,6 +7,7 @@ import (
 )
 
 type SchedulerConfig struct {
+	App   AppConfig   `koanf:"app"`
 	Log   LogConfig   `koanf:"log"`
 	HTTP  HTTPConfig  `koanf:"http"`
 	DB    DBConfig    `koanf:"db"`
@@ -18,8 +19,23 @@ type SchedulerConfig struct {
 	OutboxInterval      time.Duration `koanf:"outbox.interval"`
 }
 
+// GetHTTPConfig 实现 http.HTTPConfigProvider接口
+func (s *SchedulerConfig) GetHTTPConfig() HTTPConfig {
+	return s.HTTP
+}
+func (s *SchedulerConfig) GetLeaseTTL() time.Duration {
+	return s.LeaseTTL
+}
+
+type AppConfig struct {
+	Role string `koanf:"role"`
+}
+
 func DefaultSchedulerConfig() SchedulerConfig {
 	return SchedulerConfig{
+		App: AppConfig{
+			Role: "all",
+		},
 		Log: LogConfig{
 			Level:  "info",
 			Format: "json",
