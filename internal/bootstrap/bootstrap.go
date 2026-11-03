@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
-
+	
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shenghongio/kraken-orchestrator/internal/config"
 	"github.com/shenghongio/kraken-orchestrator/internal/observability"
@@ -24,7 +22,20 @@ import (
 // DefaultConfigPath 默认配置文件
 const DefaultConfigPath = "./configs/api.example.yaml"
 
-// Deps 服务以来，包含初始化后的资源
+// getDefaultConfigPath 获取服务对应的默认配置文件
+func getDefaultConfigPath(serviceName string) string {
+	paths := map[string]string{
+		"kraken-api":    "./configs/api.example.yaml",
+		"kraken-reaper": "./configs/reaper.example.yaml",
+		"kraken-outbox": "./configs/outbox.example.yaml",
+	}
+	if path, ok := paths[serviceName]; ok {
+		return path
+	}
+	return DefaultConfigPath
+}
+
+// Deps 服务依赖，包含初始化后的资源
 type Deps struct {
 	// Logger 统一日志
 	Logger *slog.Logger
@@ -35,30 +46,30 @@ type Deps struct {
 }
 
 // LoadConfig 加载配置文件
+// serviceName: 服务名称，用于确定默认配置路径
+// defaultPath: 如果不为空，则优先使用此路径
 // 加载顺序为: 命令行 flag > 环境变量 > 默认值
-func LoadConfig(defaultPath string) (*config.SchedulerConfig, string, error) {
+func LoadConfig(serviceName, defaultPath string) (*config.SchedulerConfig, string, error) {
 	// 如果没有指定配置文件，使用默认值
 	if defaultPath == "" {
-		defaultPath = DefaultConfigPath
+		defaultPath = getDefaultConfigPath(serviceName)
 	}
-
 	// 命令行flag 覆盖配置文件路径
 	cfgPath := flag.String("config", defaultPath, "path to kraken-orchestrator config file")
 	flag.Parse()
-
+	
 	// 环境变量优先级高于默认值，但低于命令行flag,允许通过环境变量指定配置文件
 	if !isFlagPassed("config") {
 		if envPath := os.Getenv("KRAKEN_SCHEDULER_CONFIG_PATH"); envPath != "" {
 			*cfgPath = envPath
 		}
 	}
-
 	// 使用koanf 加载配置
 	koanf, err := config.Load(*cfgPath)
 	if err != nil {
 		return nil, *cfgPath, fmt.Errorf("load config from %s: %w", *cfgPath, err)
 	}
-
+	
 	// 解析配置，未设置的字段使用零值或默认值
 	cfg := &config.SchedulerConfig{}
 	if err := koanf.Unmarshal("", cfg); err != nil {
@@ -68,22 +79,24 @@ func LoadConfig(defaultPath string) (*config.SchedulerConfig, string, error) {
 }
 
 // ValidateConfig  校验配置是否有效，每个服务可以根据需要添加额外的校验
-func ValidateConfig(cfg *config.SchedulerConfig) error {
+func ValidateConfig(cfg *config.SchedulerConfig, serviceName string) error {
 	// 通用校验 -> 数据库
 	if cfg.DB.DSN == "" {
 		return fmt.Errorf("db.dsn is required")
 	}
 	// API校验 服务需要HTTP地址用于监听请求 默认为8080
-	if cfg.HTTP.Addr == "" {
-		cfg.HTTP.Addr = ":8080"
+	if serviceName == "kraken-api" {
+		if cfg.HTTP.Addr == "" {
+			cfg.HTTP.Addr = ":8080"
+		}
+		if cfg.HTTP.ReadTimeout == 0 {
+			cfg.HTTP.ReadTimeout = 10 * time.Second
+		}
+		if cfg.HTTP.WriteTimeout == 0 {
+			cfg.HTTP.WriteTimeout = 10 * time.Second
+		}
 	}
-	if cfg.HTTP.ReadTimeout == 0 {
-		cfg.HTTP.ReadTimeout = 10 * time.Second
-	}
-	if cfg.HTTP.WriteTimeout == 0 {
-		cfg.HTTP.WriteTimeout = 10 * time.Second
-	}
-
+	
 	// 通用默认值校验
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
@@ -91,7 +104,7 @@ func ValidateConfig(cfg *config.SchedulerConfig) error {
 	if cfg.Log.Format == "" {
 		cfg.Log.Format = "json"
 	}
-
+	
 	// 数据库连接池默认值
 	if cfg.DB.MaxOpenConns == 0 {
 		cfg.DB.MaxOpenConns = 25
@@ -102,7 +115,7 @@ func ValidateConfig(cfg *config.SchedulerConfig) error {
 	if cfg.DB.ConnMaxLifetime == 0 {
 		cfg.DB.ConnMaxLifetime = 5 * time.Minute
 	}
-
+	
 	// Lease 默认值
 	if cfg.LeaseTTL == 0 {
 		cfg.LeaseTTL = 60 * time.Second
@@ -110,13 +123,13 @@ func ValidateConfig(cfg *config.SchedulerConfig) error {
 	if cfg.LeaseReaperInterval == 0 {
 		cfg.LeaseReaperInterval = 5 * time.Minute
 	}
-
+	
 	// Outbox 默认值
 	if cfg.OutboxInterval == 0 {
 		cfg.OutboxInterval = 5 * time.Minute
 	}
 	return nil
-
+	
 }
 
 // InitLogger 初始化日志 自动脱敏敏感字段
@@ -131,7 +144,7 @@ func InitDeps(ctx context.Context, cfg *config.SchedulerConfig, logger *slog.Log
 	deps := &Deps{
 		Logger: logger,
 	}
-
+	
 	// 初始化 PostgreSQL 连接池,连接失败意味着服务无法正常工作，必须返回错误
 	logger.Info("initializing postgres connection pool",
 		slog.String("dsn", observability.Redact("dsn", cfg.DB.DSN)),
@@ -151,11 +164,11 @@ func InitDeps(ctx context.Context, cfg *config.SchedulerConfig, logger *slog.Log
 		return nil, fmt.Errorf("init postgres connection pool: %w", err)
 	}
 	logger.Info("initializing redis connection pool")
-
+	
 	// 初始化 redis, 设计决策：Outbox 事件在 Redis 恢复后会自动补发
 	if cfg.Redis.Addr != "" {
 		deps.Redis = redispkg.NewRedisClient(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
-
+		
 		// ping检查 redis 连通性,单失败值记录警告,不阻塞启动
 		withTimeout, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
 		defer cancelFunc()
@@ -180,25 +193,6 @@ func CloseDeps(deps *Deps) {
 	if deps.Pool != nil {
 		deps.Pool.Close()
 	}
-}
-
-// WaitForSignal  等待系统信号并返回可取消的 Context
-// 统一生命周期管理：
-// - 监听 SIGTERM（Kubernetes/容器优雅停止）
-// - 监听 SIGINT（Ctrl+C 本地开发停止）
-// 返回的 Context 在收到信号时被取消
-
-func WaitForSignal(logger *slog.Logger) context.Context {
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancelFunc()
-	go func() {
-		sig := <-signalChan
-		logger.Info("received shoutdown signal", slog.String("signal", sig.String()))
-		cancelFunc()
-	}()
-	return ctx
 }
 
 // ShutdownTimeout 优雅关闭超时时间。统一生命周期规范，优雅关闭最多等待超时此时间

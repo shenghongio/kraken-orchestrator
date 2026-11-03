@@ -61,13 +61,13 @@ func run() error {
 	// 配置加载顺序：默认值 -> YAML 文件 -> 环境变量 -> 命令行 flag
 	// 环境变量格式：KRAKEN_HTTP__ADDR -> http.addr
 	// 命令行覆盖：./kraken-api -config /path/to/config.yaml
-	apiConfig, apiConfigPath, err := bootstrap.LoadConfig("")
+	apiConfig, apiConfigPath, err := bootstrap.LoadConfig(serviceName, "")
 	if err != nil {
 		return fmt.Errorf("file load to configuration: %w", err)
 	}
 	
 	// 校验配置，如果配置校验失败，不允许启动服务
-	if err := bootstrap.ValidateConfig(apiConfig); err != nil {
+	if err := bootstrap.ValidateConfig(apiConfig, serviceName); err != nil {
 		return fmt.Errorf("bootstrap.ValidateConfig: %w", err)
 	}
 	// 打印启动 banner

@@ -3,10 +3,7 @@
 
 log:
   level: info
-  format: json
-
-http:
-  addr: ""
+  format: text
 
 db:
   dsn: "postgres://kraken:325e91258149a0610d208b45f968de0d9913aac0@10.32.9.139:5432/kraken?sslmode=disable"

@@ -27,11 +27,11 @@ func main() {
 }
 
 func run() error {
-	reaperConfig, reaperConfigPath, err := bootstrap.LoadConfig("")
+	reaperConfig, reaperConfigPath, err := bootstrap.LoadConfig(serviceName, "")
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-	if err := bootstrap.ValidateConfig(reaperConfig); err != nil {
+	if err := bootstrap.ValidateConfig(reaperConfig, serviceName); err != nil {
 		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 	banner.Print(serviceName, reaperConfig)

@@ -28,12 +28,12 @@ func main() {
 }
 
 func run() error {
-	cfg, configPath, err := bootstrap.LoadConfig("")
+	cfg, configPath, err := bootstrap.LoadConfig(serviceName, "")
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 	
-	if err := bootstrap.ValidateConfig(cfg); err != nil {
+	if err := bootstrap.ValidateConfig(cfg, serviceName); err != nil {
 		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 	banner.Print(serviceName, cfg)
