@@ -30,20 +30,20 @@ type CreateTaskRequest struct {
 
 // TaskResponse 是对外暴露的任务 DTO，隔离内部 domain 模型
 type TaskResponse struct {
-	ID              string          `json:"id"`
-	Type            string          `json:"type"`
-	Priority        int             `json:"priority"`
-	Status          string          `json:"status"`
-	Payload         json.RawMessage `json:"payload"`
-	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
-	MaxRetries      int             `json:"max_retries"`
-	Attempt         int             `json:"attempt"`
-	CurrentAgentID  string          `json:"current_agent_id,omitempty"`
-	CancelRequested bool            `json:"cancel_requested"`
-	Result          json.RawMessage `json:"result,omitempty"`
-	Error           string          `json:"error,omitempty"`
-	CreatedAt       string          `json:"created_at"`
-	UpdatedAt       string          `json:"updated_at"`
+	ID              string          `json:"id"`                         // 任务ID
+	Type            string          `json:"type"`                       // 任务类型
+	Priority        int             `json:"priority"`                   // 优先级
+	Status          string          `json:"status"`                     // pending/running/succeeded/failed/cancelled
+	Payload         json.RawMessage `json:"payload"`                    // 任务负载 (JSON)
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`  // 幂等键
+	MaxRetries      int             `json:"max_retries"`                // 最大重试次数
+	Attempt         int             `json:"attempt"`                    // 当前尝试次数
+	CurrentAgentID  string          `json:"current_agent_id,omitempty"` // 当前处理的 agent id
+	CancelRequested bool            `json:"cancel_requested"`           // 是否请求取消
+	Result          json.RawMessage `json:"result,omitempty"`           // 任务结果
+	Error           string          `json:"error,omitempty"`            // 错误结果
+	CreatedAt       string          `json:"created_at"`                 // 创建时间
+	UpdatedAt       string          `json:"updated_at"`                 // 更新时间
 }
 
 // toTaskResponse 将内部 domain.Task 转换为对外 DTO
@@ -96,7 +96,8 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		IdempotencyKey: req.IdempotencyKey,
 		MaxRetries:     req.MaxRetries,
 	}
-	if err := h.repo.Create(r.Context(), task); err != nil {
+	createTask, err := h.repo.Create(r.Context(), task)
+	if err != nil {
 		logger.Error("create task failed", slog.String("type", string(req.Type)), observability.ErrAttr(err))
 		writeError(w, http.StatusInternalServerError, "create task failed", "internal")
 		return
@@ -104,7 +105,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	
 	logger.Debug("create task success", slog.String("task_id", string(task.ID)), slog.String("task_type", string(task.Type)))
 	// 新任务或幂等命中的已有任务，统一返回 200
-	writeJSON(w, http.StatusOK, toTaskResponse(task))
+	writeJSON(w, http.StatusOK, toTaskResponse(createTask))
 }
 
 // List GET /v1/tasks

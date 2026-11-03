@@ -46,7 +46,7 @@ func run() error {
 	
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
-	deps, err := bootstrap.InitDeps(ctx, reaperConfig, reaperLogger)
+	deps, err := bootstrap.InitDeps(ctx, reaperConfig, reaperLogger, serviceName)
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}

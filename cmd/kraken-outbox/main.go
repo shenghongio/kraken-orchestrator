@@ -48,7 +48,7 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	
-	deps, err := bootstrap.InitDeps(ctx, cfg, logger)
+	deps, err := bootstrap.InitDeps(ctx, cfg, logger, serviceName)
 	if err != nil {
 		return fmt.Errorf("init dependencies: %w", err)
 	}

@@ -85,7 +85,7 @@ func run() error {
 	// Redis：通知通道，失败不阻塞启动
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
-	deps, err := bootstrap.InitDeps(ctx, apiConfig, apiLogger)
+	deps, err := bootstrap.InitDeps(ctx, apiConfig, apiLogger, serviceName)
 	if err != nil {
 		return fmt.Errorf("init dependencies: %w", err)
 	}

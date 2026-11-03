@@ -16,7 +16,7 @@ import (
 
 var sensitiveKeys = []string{
 	"password", "secret", "token", "api_key", "apikey",
-	"credential", "dsn", "private_key", "authorization",
+	"credential", "private_key", "authorization",
 }
 
 func InitLogger(level, format string) *slog.Logger {

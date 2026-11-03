@@ -140,14 +140,14 @@ func InitLogger(cfg *config.SchedulerConfig) *slog.Logger {
 // InitDeps 初始化依赖 [PostgreSQL + Redis]
 // PostgreSQL：权威数据源，连接失败则服务启动失败
 // Redis：通知通道，连接失败不阻塞启动（Outbox 事件在恢复后补发
-func InitDeps(ctx context.Context, cfg *config.SchedulerConfig, logger *slog.Logger) (*Deps, error) {
+func InitDeps(ctx context.Context, cfg *config.SchedulerConfig, logger *slog.Logger, serviceName string) (*Deps, error) {
 	deps := &Deps{
 		Logger: logger,
 	}
 	
 	// 初始化 PostgreSQL 连接池,连接失败意味着服务无法正常工作，必须返回错误
 	logger.Info("initializing postgres connection pool",
-		slog.String("dsn", observability.Redact("dsn", cfg.DB.DSN)),
+		slog.String("dsn", cfg.DB.DSN),
 		slog.Int("max_open_conns", cfg.DB.MaxOpenConns),
 		slog.Int("max_idle_conns", cfg.DB.MaxIdleConns),
 		slog.Duration("conn_max_lifetime", cfg.DB.ConnMaxLifetime),
@@ -160,6 +160,17 @@ func InitDeps(ctx context.Context, cfg *config.SchedulerConfig, logger *slog.Log
 		cfg.DB.MaxIdleConns,
 		cfg.DB.ConnMaxLifetime,
 	)
+	
+	// 执行 migrations
+	if serviceName == "kraken-api" {
+		logger.Debug("migrating database schema")
+		migrationsFile, err := postgres.RunMigrations(ctx, deps.Pool)
+		if err != nil {
+			return nil, err
+		}
+		logger.Debug("Migrations complete", slog.String("file", migrationsFile))
+	}
+	
 	if err != nil {
 		return nil, fmt.Errorf("init postgres connection pool: %w", err)
 	}
