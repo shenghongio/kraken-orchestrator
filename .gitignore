@@ -32,6 +32,9 @@ logs/
 #  依赖管理
 # =======================================================
 vendor/             # 如果使用 vendor 目录，建议不提交（Go Modules 推荐）
+informer-demo/
+doc
+docs
 go.sum              # 保留 go.sum 是安全的，但如果您想忽略也可以（通常建议提交）
 # 注意：go.mod 和 go.sum 通常建议提交以锁定依赖版本
 

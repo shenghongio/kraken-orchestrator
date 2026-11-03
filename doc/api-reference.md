@@ -11,9 +11,8 @@ Base URL: `http://localhost:8080`（以配置为准）
 1. [健康检查](#1-健康检查)
 2. [任务接口](#2-任务接口)
 3. [Agent 接口](#3-agent-接口)
-4. [回调接口](#4-回调接口)
-5. [通用错误响应](#5-通用错误响应)
-6. [端到端测试流程](#6-端到端测试流程)
+4. [通用错误响应](#4-通用错误响应)
+5. [端到端测试流程](#5-端到端测试流程)
 
 ---
 
@@ -164,80 +163,7 @@ OK
 
 ---
 
-## 3. Agent 接口
-
-### 3.1 注册 Agent — POST /v1/agent/register
-
-注册或更新 Agent 静态信息。重复调用会 upsert（更新已有记录）。
-
-**请求 Body**：
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `agent_id` | string | 是 | Agent 唯一标识 |
-| `version` | string | 否 | Agent 版本号 |
-| `capabilities` | []string | 否 | 支持的任务类型列表 |
-| `max_concurrency` | int | 是 | 最大并发任务数，必须 > 0 |
-
-**请求示例**：
-```json
-{
-  "agent_id": "agent-001",
-  "version": "1.0.0",
-  "capabilities": ["download", "compress"],
-  "max_concurrency": 4
-}
-```
-
-**响应 200**：
-```json
-{
-  "id": "agent-001",
-  "status": "online",
-  "version": "1.0.0",
-  "capabilities": ["download", "compress"],
-  "max_concurrency": 4,
-  "busy_slots": 0,
-  "last_heartbeat": "2026-10-21T14:00:00Z",
-  "created_at": "...",
-  "updated_at": "..."
-}
-```
-
----
-
-### 3.2 心跳 — POST /v1/agent/heartbeat
-
-Agent 定期上报心跳，更新 `last_heartbeat` 和 `busy_slots`。
-
-**请求 Body**：
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `agent_id` | string | 是 | Agent ID |
-| `busy_slots` | int | 是 | 当前正在执行的任务数，>= 0 |
-
-**请求示例**：
-```json
-{
-  "agent_id": "agent-001",
-  "busy_slots": 2
-}
-```
-
-**响应 200**：
-```json
-{ "status": "ok" }
-```
-
-**响应 404**：Agent 未注册
-```json
-{ "error": "agent not found", "code": "not_found" }
-```
-
----
-
-### 3.3 申领任务 — POST /v1/agent/tasks/claim
+### 2.5 申领任务 — POST /v1/tasks/claim
 
 原子申领一个待执行任务。使用 `FOR UPDATE SKIP LOCKED` 保证并发安全。
 
@@ -277,9 +203,7 @@ Agent 定期上报心跳，更新 `last_heartbeat` 和 `busy_slots`。
 
 ---
 
-## 4. 回调接口
-
-### POST /v1/callback
+### 2.6 上报执行结果 — POST /v1/tasks/callback
 
 Agent 上报任务执行结果。必须携带申领时返回的 `attempt` 和 `lease_epoch`，用于 fencing 校验。
 
@@ -340,7 +264,80 @@ Agent 上报任务执行结果。必须携带申领时返回的 `attempt` 和 `l
 
 ---
 
-## 5. 通用错误响应
+## 3. Agent 接口
+
+### 3.1 注册 Agent — POST /v1/agents/register
+
+注册或更新 Agent 静态信息。重复调用会 upsert（更新已有记录）。
+
+**请求 Body**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `agent_id` | string | 是 | Agent 唯一标识 |
+| `version` | string | 否 | Agent 版本号 |
+| `capabilities` | []string | 否 | 支持的任务类型列表 |
+| `max_concurrency` | int | 是 | 最大并发任务数，必须 > 0 |
+
+**请求示例**：
+```json
+{
+  "agent_id": "agent-001",
+  "version": "1.0.0",
+  "capabilities": ["download", "compress"],
+  "max_concurrency": 4
+}
+```
+
+**响应 200**：
+```json
+{
+  "id": "agent-001",
+  "status": "online",
+  "version": "1.0.0",
+  "capabilities": ["download", "compress"],
+  "max_concurrency": 4,
+  "busy_slots": 0,
+  "last_heartbeat": "2026-10-21T14:00:00Z",
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+---
+
+### 3.2 心跳 — POST /v1/agents/heartbeat
+
+Agent 定期上报心跳，更新 `last_heartbeat` 和 `busy_slots`。
+
+**请求 Body**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `agent_id` | string | 是 | Agent ID |
+| `busy_slots` | int | 是 | 当前正在执行的任务数，>= 0 |
+
+**请求示例**：
+```json
+{
+  "agent_id": "agent-001",
+  "busy_slots": 2
+}
+```
+
+**响应 200**：
+```json
+{ "status": "ok" }
+```
+
+**响应 404**：Agent 未注册
+```json
+{ "error": "agent not found", "code": "not_found" }
+```
+
+---
+
+## 4. 通用错误响应
 
 所有错误响应格式统一：
 
@@ -357,23 +354,26 @@ Agent 上报任务执行结果。必须携带申领时返回的 `attempt` 和 `l
 |------|-----------|------|
 | `invalid_input` | 400 | 请求参数校验失败 |
 | `not_found` | 404 | 资源不存在 |
+| `method_not_allowed` | 405 | 请求方法不允许 |
 | `conflict` | 409 | 冲突（如 stale callback） |
 | `internal` | 500 | 服务器内部错误 |
 
+**响应头**：所有响应都带 `X-Request-Id`，用于链路追踪。
+
 ---
 
-## 6. 端到端测试流程
+## 5. 端到端测试流程
 
 按顺序执行以下步骤验证完整流程：
 
 | 步骤 | 接口 | 预期 |
 |------|------|------|
 | 1 | `GET /healthz` | 200 |
-| 2 | `POST /v1/agent/register` | 200 |
-| 3 | `POST /v1/agent/heartbeat` | 200 |
+| 2 | `POST /v1/agents/register` | 200 |
+| 3 | `POST /v1/agents/heartbeat` | 200 |
 | 4 | `POST /v1/tasks` | 200，记下 `id` |
-| 5 | `POST /v1/agent/tasks/claim` | 200，记下 `task_id`、`attempt`、`lease_epoch` |
+| 5 | `POST /v1/tasks/claim` | 200，记下 `task_id`、`attempt`、`lease_epoch` |
 | 6 | `GET /v1/tasks/{id}` | status = `running` |
-| 7 | `POST /v1/callback`（status=success） | 204 |
+| 7 | `POST /v1/tasks/callback`（status=success） | 204 |
 | 8 | `GET /v1/tasks/{id}` | status = `success` |
 | 9 | 查 DB `outbox_events` 表 | 存在 `event_type=task.success` 记录 |

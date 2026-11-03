@@ -1,0 +1,30 @@
+# kraken-reaper 配置示例
+# Reaper 不需要 HTTP 服务，但配置结构需要完整
+
+log:
+  level: info
+  format: json
+
+http:
+  addr: ""
+
+db:
+  dsn: "postgres://kraken:325e91258149a0610d208b45f968de0d9913aac0@10.32.9.139:5432/kraken?sslmode=disable"
+  max_open_conns: 10
+  max_idle_conns: 2
+  conn_max_lifetime: 10m
+
+redis:
+  addr: "10.32.9.139:16379"
+  password: "80c39852c6fa26cfbec2615d6864d7eabe185faa"
+  db: 0
+
+lease:
+  ttl: 60s
+  reaper_interval: 5s
+
+heartbeat:
+  interval: 15s
+
+outbox:
+  interval: 5s

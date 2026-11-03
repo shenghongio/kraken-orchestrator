@@ -1,28 +1,18 @@
 package banner
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
-	"strings"
-
-	"github.com/shenghongio/kraken-orchestrator/internal/version"
+	
+	"github.com/mbndr/figlet4go"
+	"github.com/shenghongio/kraken-orchestrator/internal/config"
 )
 
-//go:embed ascii-art.txt
-var asciiArt string
-
-func Print(name string) {
-	info := version.Get()
-	art := strings.TrimRight(asciiArt, "\n")
-
-	fmt.Fprintln(os.Stdout, art)
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "  %s\n", name)
-	fmt.Fprintf(os.Stdout, "  Version:    %s\n", info.Version)
-	fmt.Fprintf(os.Stdout, "  Commit:     %s\n", info.Commit)
-	fmt.Fprintf(os.Stdout, "  Build Time: %s\n", info.BuildTime)
-	fmt.Fprintf(os.Stdout, "  Go Version: %s\n", info.GoVersion)
-	fmt.Fprintf(os.Stdout, "  OS/Arch:    %s/%s\n", info.GoOS, info.GoArch)
+func Print(name string, cfg *config.SchedulerConfig) {
+	renderer := figlet4go.NewAsciiRender()
+	art, _ := renderer.Render(name)
+	
+	fmt.Fprint(os.Stdout, art)
+	fmt.Fprint(os.Stdout, "\n", "scheduler service port:\t", "["+cfg.HTTP.Addr+"]", "\n")
 	fmt.Fprintln(os.Stdout)
 }

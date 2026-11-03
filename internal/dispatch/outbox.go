@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"time"
-
+	
 	"github.com/shenghongio/kraken-orchestrator/internal/persistence/postgres"
 	redispkg "github.com/shenghongio/kraken-orchestrator/internal/persistence/redis"
 )
@@ -19,6 +19,8 @@ type OutboxDispatcher struct {
 	interval   time.Duration
 }
 
+func (d *OutboxDispatcher) Name() string { return "outbox_dispatcher" }
+
 func NewOutboxDispatcher(outboxRepo *postgres.OutboxRepository, redis *redispkg.Client, logger *slog.Logger, interval time.Duration) *OutboxDispatcher {
 	return &OutboxDispatcher{
 		outboxRepo: outboxRepo,
@@ -29,7 +31,12 @@ func NewOutboxDispatcher(outboxRepo *postgres.OutboxRepository, redis *redispkg.
 }
 
 // Run 开始循环分发，直到ctx取消
-func (d *OutboxDispatcher) Run(ctx context.Context) {
+func (d *OutboxDispatcher) Run(ctx context.Context) error {
+	defer func() {
+		if rec := recover(); rec != nil {
+			d.logger.Error("outbox dispatcher panicked: %v", slog.Any("panic", rec))
+		}
+	}()
 	ticker := time.NewTicker(d.interval)
 	defer ticker.Stop()
 	d.logger.Info("outbox dispatcher started", slog.Duration("interval", d.interval))
@@ -37,12 +44,12 @@ func (d *OutboxDispatcher) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			d.logger.Info("outbox dispatcher shutting down")
-			return
+			return nil
 		case <-ticker.C:
 			if err := d.dispatch(ctx); err != nil {
 				d.logger.Error("outbox dispatcher failed", slog.Any("error", err))
 			}
-
+			
 		}
 	}
 }
@@ -66,14 +73,14 @@ func (d *OutboxDispatcher) dispatch(ctx context.Context) error {
 			d.logger.Error("marshal outbox event faild", slog.Int64("event_id", event.ID), slog.Any("error", err))
 			continue
 		}
-
+		
 		// 发送到 Redis ,channel 名为 kraken:events
 		if err := d.redis.Publish(ctx, "kraken:events", data); err != nil {
 			// redis服务连接异常时只记录日志，不标记已发布，下次重试
 			d.logger.Error("publish to redis failed , will retry", slog.Int64("event_id", event.ID), slog.Any("error", err))
 			continue
 		}
-
+		
 		// 发送成功后标记为已发布
 		if err := d.outboxRepo.MarkPublished(ctx, event.ID); err != nil {
 			d.logger.Error("mark outbox published failed", slog.Int64("event_id", event.ID), slog.Any("error", err))
